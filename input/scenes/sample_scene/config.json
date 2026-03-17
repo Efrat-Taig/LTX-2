@@ -1,0 +1,16 @@
+{
+  "global_prompt": "High-quality 3D animation in the style of Paw Patrol, vibrant colors, clean CGI, cinematic lighting, bright and cheerful atmosphere, smooth character animation, Nick Jr aesthetic, 4k render, detailed textures, expressive facial expressions",
+  "duration": 5,
+  "specific_prompts": [
+    "Marshall is standing with a massive, happy smile, looking very satisfied. Suddenly, without warning, high-pressure water bursts from his pup-pack hose. The hose begins to thrash wildly, spraying water in chaotic arcs. Marshall's facial expression instantaneously shifts from happy to pure shock, with eyes wide open as he struggles",
+    "Marshall the Dalmatian is standing calmly. A clear speaking sequence with perfect lip-sync ensues as Marshall says: 'Water starts spraying only when I bark'. Immediately after the sentence, he executes a loud bark. At the exact moment of the bark, a powerful jet of water bursts from his hose and starts spraying everywhere."
+  ],
+  "seed": 42,
+  "dimensions": {
+    "width": 480,
+    "height": 854
+  },
+  "negative_prompt": "blurry, low quality, distorted",
+  "fps": 24,
+  "motion_bucket": 7
+}

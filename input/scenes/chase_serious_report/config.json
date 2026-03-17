@@ -1,0 +1,16 @@
+{
+  "global_prompt": "High-quality 3D animation in the style of Paw Patrol, vibrant colors, clean CGI, cinematic lighting, bright and cheerful atmosphere, smooth character animation, Nick Jr aesthetic, 4k render, detailed textures, expressive facial expressions",
+  "duration": 5,
+  "specific_prompts": [
+    "A 3D animated medium shot of Chase sitting upright and very still. He has a very serious, professional \"police officer\" expression. His ears are alert, and he is looking straight ahead. Behind him is the large glowing Adventure Bay map.",
+    "A 3D animated medium shot of Chase sitting upright and very still. He has a very serious, professional \"police officer\" expression. His ears are alert, and he is looking straight ahead. Behind him is the large glowing Adventure Bay map. Chase is sitting in a formal posture, his expression stern and focused. His mouth moves with clear, rhythmic articulation as he delivers a serious report: \"I chased my tail for an hour... and still couldn't catch the suspect.\""
+  ],
+  "seed": 42,
+  "dimensions": {
+    "width": 480,
+    "height": 854
+  },
+  "negative_prompt": "blurry, low quality, distorted",
+  "fps": 24,
+  "motion_bucket": 7
+}

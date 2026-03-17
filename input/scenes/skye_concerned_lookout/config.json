@@ -1,0 +1,16 @@
+{
+  "global_prompt": "High-quality 3D animation in the style of Paw Patrol, vibrant colors, clean CGI, cinematic lighting, bright and cheerful atmosphere, smooth character animation, Nick Jr aesthetic, 4k render, detailed textures, expressive facial expressions",
+  "duration": 5,
+  "specific_prompts": [
+    "A 3D animated close-up of Skye sitting in the Lookout. She is wearing her pink flight vest. Her expression is full of worry, eyes wide and focused on Chase (off-screen), ears perked forward. The background shows the glowing screens of the command center.",
+    "A 3D animated close-up of Skye sitting in the Lookout. She is wearing her pink flight vest. Her expression is full of worry, eyes wide and focused on Chase (off-screen), ears perked forward. The background shows the glowing screens of the command center. Skye looks up with a look of deep concern, her eyebrows furrowed. Her lips move naturally as she speaks directly to Chase: \"Oh no, what happened?\""
+  ],
+  "seed": 42,
+  "dimensions": {
+    "width": 480,
+    "height": 854
+  },
+  "negative_prompt": "blurry, low quality, distorted",
+  "fps": 24,
+  "motion_bucket": 7
+}

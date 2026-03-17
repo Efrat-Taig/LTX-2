@@ -1,0 +1,16 @@
+{
+  "global_prompt": "High-quality 3D animation in the style of Paw Patrol, vibrant colors, clean CGI, cinematic lighting, bright and cheerful atmosphere, smooth character animation, Nick Jr aesthetic, 4k render, detailed textures, expressive facial expressions",
+  "duration": 5,
+  "specific_prompts": [
+    "A high-quality 3D animation of Chase from PAW Patrol walking into the Lookout. He looks extremely tired, head hanging low, shoulders slumped, eyes drooping. He is walking slowly across the colorful paw-print floor. The lighting is soft, showing the interior of the command center.",
+    "A high-quality 3D animation of Chase from PAW Patrol walking into the Lookout. He looks extremely tired, head hanging low, shoulders slumped, eyes drooping. He is walking slowly across the colorful paw-print floor. The lighting is soft, showing the interior of the command center. Chase is walking with a weary expression, his mouth moving in sync with his speech. He looks down at the floor, exhaling deeply as he speaks with a tired, gravelly voice: \"Ugh... I've had a really RUFF day.\""
+  ],
+  "seed": 42,
+  "dimensions": {
+    "width": 480,
+    "height": 854
+  },
+  "negative_prompt": "blurry, low quality, distorted",
+  "fps": 24,
+  "motion_bucket": 7
+}

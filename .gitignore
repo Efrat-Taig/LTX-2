@@ -39,3 +39,7 @@ tmp
 *.png
 *.wav
 *.webp
+
+# Exception: track scene assets for reproducibility
+!input/scenes/**/*.png
+!input/scenes/**/*.json
