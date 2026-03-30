@@ -83,6 +83,31 @@ def ensure_gemma_dir(model_dir: Path, repo_id: str, token: str | None) -> None:
         raise RuntimeError(msg)
 
 
+def _require_local_models(model_path: Path, text_encoder_path: Path) -> None:
+    """Exit with a clear message if checkpoints are missing (e.g. user passed --no-download-models)."""
+    if not model_path.is_file():
+        typer.echo(
+            f"LTX checkpoint not found: {model_path}\n"
+            "  Fix: run without --no-download-models, or place ltx-2-19b-dev.safetensors there, "
+            "or pass --model-path to an existing .safetensors file.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+    gemma_cfg = text_encoder_path / "config.json"
+    if not text_encoder_path.is_dir() or not gemma_cfg.is_file():
+        typer.echo(
+            f"Gemma model directory missing or incomplete: {text_encoder_path}\n"
+            "  Expected a folder containing config.json (Hugging Face Gemma layout).\n"
+            "  Fix: omit --no-download-models so this script can download from Hugging Face, "
+            "or download manually:\n"
+            "    huggingface-cli download google/gemma-3-12b-it-qat-q4_0-unquantized "
+            f"--local-dir {text_encoder_path}\n"
+            "  Gated models need HF_TOKEN and accepting the license on huggingface.co.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+
 def _run(cmd: list[str]) -> None:
     typer.echo(f"Running: {' '.join(cmd)}")
     subprocess.run(cmd, check=True, cwd=str(SCRIPTS_DIR))
@@ -139,7 +164,7 @@ def main(
     download_models: bool = typer.Option(
         True,
         "--download-models/--no-download-models",
-        help="Download LTX + Gemma from Hugging Face when paths are missing",
+        help="Download LTX + Gemma when missing; if disabled, paths must already exist (validated before preprocess)",
     ),
     ltx_repo: str = typer.Option(DEFAULT_LTX_REPO, "--ltx-repo"),
     ltx_filename: str = typer.Option(DEFAULT_LTX_FILE, "--ltx-filename"),
@@ -164,17 +189,14 @@ def main(
     local_data_dir = local_data_dir.expanduser().resolve()
     dataset_json = local_data_dir / "dataset.json"
 
-    if download_models:
-        ensure_ltx_checkpoint(
-            model_path.expanduser().resolve(),
-            ltx_repo,
-            ltx_filename,
-            token,
-        )
-        ensure_gemma_dir(text_encoder_path.expanduser().resolve(), gemma_repo, token)
-
     model_path = model_path.expanduser().resolve()
     text_encoder_path = text_encoder_path.expanduser().resolve()
+
+    if download_models:
+        ensure_ltx_checkpoint(model_path, ltx_repo, ltx_filename, token)
+        ensure_gemma_dir(text_encoder_path, gemma_repo, token)
+    else:
+        _require_local_models(model_path, text_encoder_path)
 
     if not skip_prep2:
         cmd: list[str] = [
