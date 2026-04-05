@@ -972,10 +972,11 @@ class LtxvTrainer:
             return
 
         wandb_config = self._config.wandb
+        run_display_name = wandb_config.run_name or Path(self._config.output_dir).name
         run = wandb.init(
             project=wandb_config.project,
             entity=wandb_config.entity,
-            name=Path(self._config.output_dir).name,
+            name=run_display_name,
             tags=wandb_config.tags,
             config=self._config.model_dump(),
         )

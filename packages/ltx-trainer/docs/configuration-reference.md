@@ -333,6 +333,7 @@ wandb:
   enabled: false               # Enable W&B logging
   project: "ltx-2-trainer"     # W&B project name
   entity: null                 # W&B username or team
+  run_name: null               # W&B run display name (default: basename of output_dir)
   tags: [ ]                    # Tags for the run
   log_validation_videos: true  # Log validation videos to W&B
 ```
@@ -344,6 +345,7 @@ wandb:
 | `enabled`               | Whether to enable W&B logging                    |
 | `project`               | W&B project name                                 |
 | `entity`                | W&B username or team (null uses default account) |
+| `run_name`              | W&B run display name (null → `output_dir` basename) |
 | `log_validation_videos` | Whether to log validation videos to W&B          |
 
 ### FlowMatchingConfig

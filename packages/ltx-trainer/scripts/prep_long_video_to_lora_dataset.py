@@ -13,9 +13,9 @@ Use `--no-caption` only if you already have a manifest (`--dataset-json`). To ca
 Example (from repo root, after `uv sync`):
 
     uv run python packages/ltx-trainer/scripts/prep_long_video_to_lora_dataset.py \\
-      --model-path /path/to/ltx-2.3-22b-dev.safetensors \\
       --work-dir ./data/paw_patrol_s01e01
 
+`--model-path` defaults to `<LTX-2 repo>/models/ltx-2.3-22b-dev.safetensors` (place the HF download there).
 `--text-encoder-path` defaults to `<LTX-2 repo>/models/gemma-3-12b-it-qat-q4_0-unquantized`
 (HF: google/gemma-3-12b-it-qat-q4_0-unquantized). Override if your checkout lives elsewhere.
 
@@ -47,6 +47,11 @@ def _ltx_repo_root() -> Path:
 
 def _default_text_encoder_path() -> str:
     return str(_ltx_repo_root() / "models" / "gemma-3-12b-it-qat-q4_0-unquantized")
+
+
+def _default_model_path() -> str:
+    """LTX-2 checkpoint beside Gemma under <repo>/models/ (see LTX-2 README / Hugging Face)."""
+    return str(_ltx_repo_root() / "models" / "ltx-2.3-22b-dev.safetensors")
 
 
 def _is_gs_uri(s: str) -> bool:
@@ -112,9 +117,9 @@ def main(
         help="Run process_dataset.py (VAE latents + Gemma embeddings)",
     ),
     model_path: str = typer.Option(
-        ...,
+        _default_model_path(),
         "--model-path",
-        help="Local path to LTX-2 .safetensors checkpoint",
+        help="LTX-2 .safetensors checkpoint (default: <repo>/models/ltx-2.3-22b-dev.safetensors)",
     ),
     text_encoder_path: str = typer.Option(
         _default_text_encoder_path(),
@@ -243,6 +248,15 @@ def main(
 
     # 4) Preprocess
     if preprocess:
+        mp = Path(model_path).expanduser().resolve()
+        if not mp.is_file():
+            typer.echo(
+                f"Missing LTX checkpoint for preprocessing: {mp}\n"
+                "Download ltx-2.3-22b-dev.safetensors (or your variant) into models/ "
+                "or pass --model-path to the real file.",
+                err=True,
+            )
+            raise typer.Exit(code=1)
         typer.echo("Preprocessing (latents + embeddings)...")
         pre_args: list[str] = [
             str(dataset_path),

@@ -433,6 +433,11 @@ class WandbConfig(ConfigBaseModel):
         description="W&B username or team",
     )
 
+    run_name: str | None = Field(
+        default=None,
+        description="W&B run name (shown as the run display name). If null, uses the last segment of output_dir.",
+    )
+
     tags: list[str] = Field(
         default_factory=list,
         description="Tags to add to the W&B run",

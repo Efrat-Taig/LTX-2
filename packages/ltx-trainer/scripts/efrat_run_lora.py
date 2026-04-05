@@ -1,14 +1,19 @@
 #!/usr/bin/env python3
 """
-Batch LTX inference over `input/benchmark_v1` scenarios: each prompt is run **twice**
-(with the LoRA, then with the base LTX-2 checkpoint only). Outputs share one folder per scenario.
+Batch LTX inference over benchmark scenarios: each prompt gets **one base-model render** (shared across
+all LoRA steps), then **one LoRA render per checkpoint** in `LORA_STEPS`.
 
   cd packages/ltx-trainer
   uv run python scripts/efrat_run_lora.py
 
 Edit CONFIG below. Set `SCENARIO_NAMES` to restrict which benchmark subfolders run; leave empty
-to process every subfolder of BENCHMARK_DIR. Outputs: `prompt_XX_lora.*` and `prompt_XX_base.*`
-under OUTPUT_BASE / <scenario_name> /.
+to process every directory under BENCHMARK_DIR that contains a `config.json` (recursive).
+Outputs: `OUTPUT_BASE_PARENT/base/<scenario_key>/prompt_XX_base.*` (once each), and
+`OUTPUT_BASE_PARENT/step_<N>/<scenario_key>/prompt_XX_lora.*` per checkpoint.
+Use `USE_CONDITION_IMAGE_ASPECT` to size output from each scenario’s conditioning image (e.g. `start_frame.png`)
+while keeping aspect ratio; `CONDITION_IMAGE_MAX_SIDE` caps the long edge. Or set `INFER_WIDTH`/`INFER_HEIGHT`
+for fixed resolution. `NUM_INFERENCE_STEPS` / `INFER_DURATION_SEC` tune speed vs quality.
+Nested paths use `__` in the folder name (e.g. `veo__skye_chase_crosswalk_safety`).
 
 Per scenario: prompts, negative prompt, seed, fps, duration, and dimensions come from that folder’s
 `config.json`. The conditioning image is `start_frame.png` in that same folder (or `images[0].path`
@@ -19,9 +24,12 @@ at the bottom of CONFIG are off by default so behavior matches the benchmark fil
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
+
+from PIL import Image
 
 # =============================================================================
 # CONFIG — edit these values
@@ -36,32 +44,52 @@ CHECKPOINT: Path = REPO_ROOT / "models" / "ltx-2.3-22b-dev.safetensors"
 # Gemma text encoder directory (same as training `text_encoder_path`).
 TEXT_ENCODER_PATH: Path = REPO_ROOT / "models" / "gemma-3-12b-it-qat-q4_0-unquantized"
 
-# Fixed LoRA checkpoint (step 2000).
-LORA_PATH: Path = (
-    REPO_ROOT
-    / "packages"
-    / "ltx-trainer"
-    / "outputs"
-    / "skye_golden_av_lora"
-    / "checkpoints"
-    / "lora_weights_step_02000.safetensors"
-)
+# Training run output dir — must match `output_dir` in the training YAML (checkpoints:
+# <TRAINING_OUTPUT_DIR>/checkpoints/lora_weights_step_XXXXX.safetensors). Override with env
+# LTX_TRAINING_OUTPUT_DIR if your run used a different folder.
+def _training_output_dir() -> Path:
+    env = os.environ.get("LTX_TRAINING_OUTPUT_DIR")
+    if env:
+        return Path(env).expanduser().resolve()
+    return REPO_ROOT / "outputs" / "paw_patrol_s01e01_lora_10k"
+
+
+TRAINING_OUTPUT_DIR: Path = _training_output_dir()
+CHECKPOINTS_DIR: Path = TRAINING_OUTPUT_DIR / "checkpoints"
+
+# Run these LoRA steps (each run compares LoRA vs base; outputs go under OUTPUT_BASE_PARENT / step_<N>/).
+LORA_STEPS: list[int] = [10_000, 5000, 3000]
 
 # Benchmark scenarios (each subdir may contain config.json + optional start_frame.png, etc.).
 BENCHMARK_DIR: Path = REPO_ROOT / "input" / "benchmark_v1"
 
-# Only these subfolder names under BENCHMARK_DIR are run (order preserved).
-# Leave empty to run all subdirectories that contain config.json.
-SCENARIO_NAMES: list[str] = [
-    "skye_helicopter_birthday_gili",
-    "skye_chase_trampoline_backflip",
-]
+# Only these paths under BENCHMARK_DIR are run (order preserved). Use POSIX-style segments
+# for nested dirs, e.g. "veo/skye_chase_crosswalk_safety".
+# Leave empty to run every directory under BENCHMARK_DIR that contains config.json (recursive).
+SCENARIO_NAMES: list[str] = []
 
-# All videos / sidecar audio land here: OUTPUT_BASE / <scenario_name> / ...
-OUTPUT_BASE: Path = REPO_ROOT / "output" / "lora_res" / "lora_skye_golden_v2"
+# Root for this batch: base videos under OUTPUT_BASE_PARENT/base/...; LoRA under step_<N>/...
+OUTPUT_BASE_PARENT: Path = TRAINING_OUTPUT_DIR / "efrat_benchmark_v1"
+
+# If True, skip base inference when prompt_XX_base.mp4 already exists under `base/<scenario>/` **or**
+# under any legacy path `step_<N>/<scenario>/` (older layout duplicated base per step).
+SKIP_EXISTING_BASE: bool = True
+
+# If True, width/height follow the conditioning image aspect ratio (scaled so the long edge is at most
+# CONDITION_IMAGE_MAX_SIDE; both sides snapped to multiples of 32). Falls back if there is no image.
+USE_CONDITION_IMAGE_ASPECT: bool = True
+CONDITION_IMAGE_MAX_SIDE: int = 960
+
+# Fixed resolution (multiples of 32). Used only when USE_CONDITION_IMAGE_ASPECT is False.
+# Set both to None to use each benchmark's config.json dimensions instead.
+INFER_WIDTH: int | None = None
+INFER_HEIGHT: int | None = None
+
+# Wall-clock target in seconds. None = use each benchmark `config.json` `duration`. Set to ~10 for full clips.
+INFER_DURATION_SEC: float | None = 10.0
 
 # Inference defaults — aligned with repo `run_skye_video.sh` (same CLI as scripts/inference.py).
-NUM_INFERENCE_STEPS: int = 40
+NUM_INFERENCE_STEPS: int = 20
 GUIDANCE_SCALE: float = 4.0
 STG_SCALE: float = 1.0
 STG_BLOCKS: list[int] = [29]
@@ -93,6 +121,35 @@ COMBINE_GLOBAL_AND_SPECIFIC_PROMPTS: bool = True
 def snap_multiple_of_32(n: int, *, minimum: int = 32) -> int:
     """LTX requires height/width divisible by 32."""
     return max(minimum, ((int(n) + 31) // 32) * 32)
+
+
+def find_existing_base_video(output_parent: Path, scenario_key: str, tag: str) -> Path | None:
+    """Return path to an existing base mp4 if present in canonical or legacy `step_*` folders."""
+    name = f"prompt_{tag}_base.mp4"
+    canonical = output_parent / "base" / scenario_key / name
+    if canonical.is_file():
+        return canonical
+    for step_dir in sorted(output_parent.glob("step_*")):
+        if not step_dir.is_dir():
+            continue
+        legacy = step_dir / scenario_key / name
+        if legacy.is_file():
+            return legacy
+    return None
+
+
+def dimensions_from_condition_image(path: Path, max_side: int) -> tuple[int, int]:
+    """Preserve source aspect ratio; scale so long edge <= max_side; W/H divisible by 32."""
+    with Image.open(path) as im:
+        w0, h0 = im.size
+    if w0 < 1 or h0 < 1:
+        raise ValueError(f"Invalid image dimensions {w0}x{h0}: {path}")
+    scale = float(max_side) / float(max(w0, h0))
+    w_float = w0 * scale
+    h_float = h0 * scale
+    width = snap_multiple_of_32(int(round(w_float)))
+    height = snap_multiple_of_32(int(round(width * h0 / w0)))
+    return width, height
 
 
 def num_frames_from_duration(duration_sec: float, fps: float) -> int:
@@ -146,18 +203,29 @@ def build_full_prompt(cfg: dict, specific: str) -> str:
     return text
 
 
+def discover_scenario_dirs_with_config(benchmark_dir: Path) -> list[Path]:
+    """Every directory under benchmark_dir that contains config.json (recursive, sorted)."""
+    return sorted({p.parent for p in benchmark_dir.rglob("config.json")}, key=lambda p: str(p))
+
+
+def scenario_output_key(scenario_dir: Path, benchmark_root: Path) -> str:
+    """Unique folder name under OUTPUT_BASE; nested paths use __ instead of /."""
+    rel = scenario_dir.resolve().relative_to(benchmark_root.resolve())
+    return rel.as_posix().replace("/", "__")
+
+
 def iter_scenario_dirs(benchmark_dir: Path, only_names: list[str]) -> list[Path]:
     if not benchmark_dir.is_dir():
         raise FileNotFoundError(f"BENCHMARK_DIR not found: {benchmark_dir}")
     if only_names:
         out: list[Path] = []
         for name in only_names:
-            p = benchmark_dir / name
+            p = (benchmark_dir / name).resolve()
             if not p.is_dir():
                 raise FileNotFoundError(f"Scenario folder not found: {p}")
             out.append(p)
         return out
-    return sorted(d for d in benchmark_dir.iterdir() if d.is_dir())
+    return discover_scenario_dirs_with_config(benchmark_dir)
 
 
 def run_one_inference(
@@ -239,11 +307,12 @@ def main() -> None:
     if not inference_script.is_file():
         raise FileNotFoundError(f"Expected inference.py next to this script: {inference_script}")
 
-    lora = LORA_PATH.expanduser().resolve()
-    if not lora.is_file():
-        raise FileNotFoundError(f"LORA_PATH does not exist: {lora}")
+    if not LORA_STEPS:
+        raise ValueError("LORA_STEPS is empty; set at least one checkpoint step.")
 
-    OUTPUT_BASE.mkdir(parents=True, exist_ok=True)
+    OUTPUT_BASE_PARENT.mkdir(parents=True, exist_ok=True)
+    base_root = OUTPUT_BASE_PARENT / "base"
+    base_root.mkdir(parents=True, exist_ok=True)
 
     scenarios = iter_scenario_dirs(BENCHMARK_DIR, SCENARIO_NAMES)
     if not scenarios:
@@ -258,67 +327,112 @@ def main() -> None:
             continue
 
         cfg = load_benchmark_config(scenario_dir)
-        name = scenario_dir.name
+        name = scenario_output_key(scenario_dir, BENCHMARK_DIR)
+        label = str(scenario_dir.relative_to(BENCHMARK_DIR))
         prompts: list[str] = cfg.get("specific_prompts") or []
         if not prompts:
-            print(f"Skip (no specific_prompts): {name}")
+            print(f"Skip (no specific_prompts): {label}")
             continue
-
-        dim = cfg.get("dimensions") or {}
-        raw_w = int(dim.get("width", 1280))
-        raw_h = int(dim.get("height", 720))
-        width = snap_multiple_of_32(raw_w)
-        height = snap_multiple_of_32(raw_h)
-        if width != raw_w or height != raw_h:
-            print(f"  Note: snapped dimensions {raw_w}x{raw_h} -> {width}x{height} (multiple of 32)")
-
-        duration = float(cfg.get("duration", 10))
-        fps = float(FRAME_RATE_OVERRIDE if FRAME_RATE_OVERRIDE is not None else cfg.get("fps", 24))
-        num_frames = num_frames_from_duration(duration, fps)
 
         neg = (cfg.get("negative_prompt") or "").strip()
         seed = int(cfg.get("seed", 42))
         condition_image = resolve_condition_image(scenario_dir, cfg, FALLBACK_CONDITION_IMAGE)
 
-        out_dir = OUTPUT_BASE / name
-        out_dir.mkdir(parents=True, exist_ok=True)
+        if USE_CONDITION_IMAGE_ASPECT and condition_image is not None:
+            width, height = dimensions_from_condition_image(condition_image, CONDITION_IMAGE_MAX_SIDE)
+            print(
+                f"  Resolution from conditioning image ({condition_image.name}): "
+                f"{width}x{height} (aspect ratio preserved, max {CONDITION_IMAGE_MAX_SIDE}px long edge)"
+            )
+        elif INFER_WIDTH is not None and INFER_HEIGHT is not None:
+            raw_w, raw_h = INFER_WIDTH, INFER_HEIGHT
+            width = snap_multiple_of_32(raw_w)
+            height = snap_multiple_of_32(raw_h)
+            if width != raw_w or height != raw_h:
+                print(f"  Note: snapped INFER dims {raw_w}x{raw_h} -> {width}x{height}")
+        else:
+            dim = cfg.get("dimensions") or {}
+            raw_w = int(dim.get("width", 1280))
+            raw_h = int(dim.get("height", 720))
+            width = snap_multiple_of_32(raw_w)
+            height = snap_multiple_of_32(raw_h)
+            if width != raw_w or height != raw_h:
+                print(f"  Note: snapped dimensions {raw_w}x{raw_h} -> {width}x{height} (multiple of 32)")
+
+        duration = float(INFER_DURATION_SEC if INFER_DURATION_SEC is not None else cfg.get("duration", 10))
+        fps = float(FRAME_RATE_OVERRIDE if FRAME_RATE_OVERRIDE is not None else cfg.get("fps", 24))
+        num_frames = num_frames_from_duration(duration, fps)
+
+        scenario_base_dir = base_root / name
+        scenario_base_dir.mkdir(parents=True, exist_ok=True)
 
         for i, spec in enumerate(prompts):
             prompt = build_full_prompt(cfg, spec)
             tag = f"{i:02d}"
 
-            runs: list[tuple[str, Path | None]] = [
-                ("lora", lora),
-                ("base", None),
-            ]
+            base_mp4 = scenario_base_dir / f"prompt_{tag}_base.mp4"
+            base_wav = scenario_base_dir / f"prompt_{tag}_base.wav"
 
-            for label, lora_for_run in runs:
-                output_mp4 = out_dir / f"prompt_{tag}_{label}.mp4"
-                audio_out = out_dir / f"prompt_{tag}_{label}.wav"
-
+            existing_base = (
+                find_existing_base_video(OUTPUT_BASE_PARENT, name, tag) if SKIP_EXISTING_BASE else None
+            )
+            if SKIP_EXISTING_BASE and existing_base is not None:
+                print(f"  Skip base (exists): {existing_base.relative_to(OUTPUT_BASE_PARENT)}")
+            else:
                 print("=" * 80)
-                print(
-                    f"Scenario: {name}  [{i + 1}/{len(prompts)}]  "
-                    f"{'LoRA' if label == 'lora' else 'base LTX-2'} -> {output_mp4.name}"
-                )
+                print(f"Base LTX-2 | {label}  [{i + 1}/{len(prompts)}]  -> {base_mp4.name}")
                 print("=" * 80)
-
                 code = run_one_inference(
                     inference_script=inference_script,
-                    lora=lora_for_run,
+                    lora=None,
                     prompt=prompt,
                     negative_prompt=neg,
-                    output_mp4=output_mp4,
+                    output_mp4=base_mp4,
                     seed=seed,
                     height=height,
                     width=width,
                     num_frames=num_frames,
                     frame_rate=fps,
                     condition_image=condition_image,
-                    audio_output=audio_out,
+                    audio_output=base_wav,
                 )
                 if code != 0:
-                    failed.append(f"{name}/prompt_{tag}_{label} (exit {code})")
+                    failed.append(f"base/{label}/prompt_{tag}_base (exit {code})")
+
+            for step in LORA_STEPS:
+                lora = CHECKPOINTS_DIR / f"lora_weights_step_{step:05d}.safetensors"
+                lora = lora.expanduser().resolve()
+                if not lora.is_file():
+                    print(f"  Skip LoRA step {step}: missing {lora.name}")
+                    continue
+
+                step_out = OUTPUT_BASE_PARENT / f"step_{step}" / name
+                step_out.mkdir(parents=True, exist_ok=True)
+                lora_mp4 = step_out / f"prompt_{tag}_lora.mp4"
+                lora_wav = step_out / f"prompt_{tag}_lora.wav"
+
+                print("=" * 80)
+                print(
+                    f"LoRA step {step} | Scenario: {label}  [{i + 1}/{len(prompts)}]  -> {lora_mp4.name}"
+                )
+                print("=" * 80)
+
+                code = run_one_inference(
+                    inference_script=inference_script,
+                    lora=lora,
+                    prompt=prompt,
+                    negative_prompt=neg,
+                    output_mp4=lora_mp4,
+                    seed=seed,
+                    height=height,
+                    width=width,
+                    num_frames=num_frames,
+                    frame_rate=fps,
+                    condition_image=condition_image,
+                    audio_output=lora_wav,
+                )
+                if code != 0:
+                    failed.append(f"step_{step}/{label}/prompt_{tag}_lora (exit {code})")
 
     if failed:
         print("\nFailures:")
