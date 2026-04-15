@@ -766,13 +766,19 @@ class ValidationSampler:
 
     def _decode_audio(self, audio_state: LatentState, device: torch.device) -> Tensor:
         """Decode audio latents to waveform."""
-        self._audio_decoder.to(device)
-        # Ensure latent is bfloat16 to match decoder weights
-        latent = audio_state.latent.to(dtype=torch.bfloat16)
+        # Run audio decoder on CPU to avoid CUDA SIGABRT in CausalConv2d
+        # (asymmetric manual padding + Conv2d crashes on some CUDA/cuDNN versions)
+        cpu_device = torch.device("cpu")
+        self._audio_decoder.to(cpu_device)
+        first_param = next(self._audio_decoder.parameters(), None)
+        decoder_dtype = first_param.dtype if first_param is not None else audio_state.latent.dtype
+        latent = audio_state.latent.to(dtype=decoder_dtype, device=cpu_device)
         decoded_audio = self._audio_decoder(latent)
         self._audio_decoder.to("cpu")
 
-        self._vocoder.to(device)
+        # Vocoder internally calls mel_spec.float(); cast model to float32 so dtypes match.
+        # (torch.autocast with dtype=float32 is a no-op on CPU, leaving weights in bfloat16.)
+        self._vocoder.to(cpu_device).float()
         audio_waveform = self._vocoder(decoded_audio)
         self._vocoder.to("cpu")
 

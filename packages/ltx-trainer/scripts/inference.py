@@ -311,6 +311,12 @@ def main() -> None:  # noqa: PLR0912, PLR0915
         text_encoder_path=args.text_encoder_path,
     )
 
+    embeddings_processor = load_embeddings_processor(
+        checkpoint_path=args.checkpoint,
+        device="cpu",
+        dtype=torch.bfloat16,
+    )
+
     # Apply LoRA weights if provided
     transformer = components.transformer
     if args.lora_path is not None:
@@ -423,6 +429,7 @@ def main() -> None:  # noqa: PLR0912, PLR0915
             audio_decoder=components.audio_vae_decoder if generate_audio else None,
             vocoder=components.vocoder if generate_audio else None,
             sampling_context=progress,
+            embeddings_processor=embeddings_processor,
         )
         video, audio = sampler.generate(
             config=gen_config,

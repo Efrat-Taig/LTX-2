@@ -59,9 +59,12 @@ class CausalConv2d(torch.nn.Module):
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # Apply causal padding before convolution
+        # Apply causal padding before convolution.
+        # cuDNN can abort with asymmetric manual padding on some CUDA versions;
+        # fall back to the native (non-cuDNN) math path for this layer only.
         x = F.pad(x, self.padding)
-        return self.conv(x)
+        with torch.backends.cudnn.flags(enabled=False):
+            return self.conv(x)
 
 
 def make_conv2d(
