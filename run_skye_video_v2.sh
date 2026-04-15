@@ -26,9 +26,9 @@ IMAGE_PATH="${IMAGE_PATH:-$SCRIPT_DIR/inputs/BM_v1/benchmark_v1/skye_helicopter_
 OUTPUT_DIR="${OUTPUT_DIR:-$SCRIPT_DIR}"
 OUTPUT_BASE_NAME="${OUTPUT_BASE_NAME:-skye_helicopter_birthday_gili}"
 SEED="${SEED:-42}"
-WIDTH="${WIDTH:-704}"
-HEIGHT="${HEIGHT:-1280}"
-NUM_INFERENCE_STEPS="${NUM_INFERENCE_STEPS:-40}"
+WIDTH="${WIDTH:-224}"
+HEIGHT="${HEIGHT:-416}"
+NUM_INFERENCE_STEPS="${NUM_INFERENCE_STEPS:-3}"
 
 # Video length: num_frames must be k*8+1 (e.g. 17, 25, 33, 49, 65, 81, 97, 121)
 # Duration = num_frames / frame_rate (e.g. 97 frames @ 25fps = 3.88s)
