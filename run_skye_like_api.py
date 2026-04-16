@@ -33,20 +33,15 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 # Start frame image
 DEFAULT_IMAGE = SCRIPT_DIR / "inputs/BM_v1/benchmark_v1/skye_helicopter_birthday_gili/start_frame.png"
 
-# Shared scene setup used in all prompt parts
-_SCENE_SETUP = (
+# Prompt — edit freely
+DEFAULT_PROMPT = (
     "High-quality 3D CGI children's cartoon style, vibrant colors, clean CGI, "
     "cinematic lighting, smooth character animation, preschool-friendly aesthetic, "
     "4k render, detailed textures, expressive facial expressions. "
     "Pink pup in pilot helmet and flight gear inside helicopter cockpit, hovering in place. "
     "Both paws gripping the helicopter controls at all times — paws never leave the controls, no waving. "
     "Rotors spinning overhead. Camera locked on cockpit — no camera movement.\n\n"
-)
-
-# Full prompt (for single-video runs)
-DEFAULT_PROMPT = (
-    _SCENE_SETUP
-    + "[DIALOGUE - WHAT SHE SAYS]\n"
+    "[DIALOGUE - WHAT SHE SAYS]\n"
     "Pink aviator pup (in a warm, cheerful voice, speaking directly to camera): "
     '"Hi Gili — I heard it\'s your birthday, so I came to wish you a happy birthday!" '
     "Expressive face, mouth moving clearly with the words. Both paws remain on the controls.\n\n"
@@ -61,32 +56,6 @@ DEFAULT_PROMPT = (
     'stay happy and joyful! From all of us here at Adventure Bay." '
     "Big smile, excited expression, mouth moving animatedly. Both paws on the helicopter controls throughout."
 )
-
-# Part 1 — first two lines of speech (for 2×10s split)
-PART1_PROMPT = (
-    _SCENE_SETUP
-    + "[DIALOGUE - WHAT SHE SAYS]\n"
-    "Pink aviator pup (in a warm, cheerful voice, speaking directly to camera): "
-    '"Hi Gili — I heard it\'s your birthday, so I came to wish you a happy birthday!" '
-    "Expressive face, mouth moving clearly with the words. Both paws remain on the controls.\n\n"
-    "[DIALOGUE - WHAT SHE SAYS]\n"
-    "Pink aviator pup (warmly, sincerely): "
-    '"Your mom, Efrat, asked me to tell you that you\'re a wonderful girl! '
-    "You're an amazing person! A wonderful human — you're perfect just the way you are.\" "
-    "Warm smile, expressive eyes, mouth moving with the speech. Paws steady on the controls."
-)
-
-# Part 2 — third line of speech (for 2×10s split); use last frame of Part 1 as start image
-PART2_PROMPT = (
-    _SCENE_SETUP
-    + "[DIALOGUE - WHAT SHE SAYS]\n"
-    "Pink aviator pup (enthusiastic, upbeat, continuing her birthday message): "
-    '"Keep being a great big sister to your little sister Aya, and most importantly — '
-    'stay happy and joyful! From all of us here at Adventure Bay." '
-    "Big smile, excited expression, mouth moving animatedly. Both paws on the helicopter controls throughout."
-)
-
-PROMPTS = {"full": DEFAULT_PROMPT, "part1": PART1_PROMPT, "part2": PART2_PROMPT}
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  EDIT THESE — model weights paths
@@ -217,13 +186,11 @@ def main() -> int:
                         help="Video guidance scale (CFG).")
     parser.add_argument("--image", type=Path, default=DEFAULT_IMAGE,
                         help="Start frame image path.")
-    parser.add_argument("--prompt-part", choices=["full", "part1", "part2"], default="full",
-                        help="Which prompt to use: full (default), part1 or part2 (for 2x10s split).")
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     args = parser.parse_args()
 
     image_path = args.image
-    prompt = PROMPTS[args.prompt_part]
+    prompt = DEFAULT_PROMPT
 
     # Validate
     if not image_path.exists():
@@ -273,10 +240,9 @@ def main() -> int:
         nf = frames_for_duration(dur, DEFAULT_FPS)
         actual_dur = round(nf / DEFAULT_FPS, 2)
         img_tag = image_path.stem.replace(" ", "_")[:40]
-        part_tag = f"_{args.prompt_part}" if args.prompt_part != "full" else ""
         out_name = (
             f"run_skye_like_api__{img_tag}__{DEFAULT_WIDTH}x{DEFAULT_HEIGHT}_"
-            f"{DEFAULT_STEPS}steps_cfg{args.video_cfg}{part_tag}_{actual_dur}s_seed{seed}.mp4"
+            f"{DEFAULT_STEPS}steps_cfg{args.video_cfg}_{actual_dur}s_seed{seed}.mp4"
         )
         output_path = args.output_dir / out_name
 
