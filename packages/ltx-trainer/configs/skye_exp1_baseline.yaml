@@ -87,7 +87,7 @@ hub:
   hub_model_id: null
 
 wandb:
-  enabled: false
+  enabled: true
   project: "ltx-2-skye-lora"
   entity: null
   tags: ["ltx2", "lora", "skye", "exp1-baseline"]
