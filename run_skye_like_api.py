@@ -165,6 +165,12 @@ def main() -> int:
     from ltx_core.components.guiders import MultiModalGuiderParams
     from ltx_pipelines.utils.constants import DEFAULT_NEGATIVE_PROMPT
 
+    negative_prompt = (
+        DEFAULT_NEGATIVE_PROMPT
+        + ", waving paw, raised paw, paw in the air, arm raised, hand gesture, "
+        "waving hand, pointing, gesturing, paw movement, arm movement"
+    )
+
     parser = argparse.ArgumentParser(
         description="run_skye_like_api — LTX-2.3 HQ local inference",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
@@ -236,7 +242,7 @@ def main() -> int:
             generate_one(
                 pipeline,
                 prompt=DEFAULT_PROMPT,
-                negative_prompt=DEFAULT_NEGATIVE_PROMPT,
+                negative_prompt=negative_prompt,
                 seed=seed,
                 num_frames=nf,
                 width=DEFAULT_WIDTH,
