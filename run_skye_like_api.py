@@ -181,6 +181,8 @@ def main() -> int:
                         help="Random seed. Omit for random.")
     parser.add_argument("--no-audio", action="store_true",
                         help="Skip audio generation (faster, same video quality).")
+    parser.add_argument("--video-cfg", type=float, default=DEFAULT_VIDEO_CFG,
+                        help="Video guidance scale (CFG).")
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     args = parser.parse_args()
 
@@ -196,7 +198,7 @@ def main() -> int:
         return 1
 
     video_guider_params = MultiModalGuiderParams(
-        cfg_scale=DEFAULT_VIDEO_CFG,
+        cfg_scale=args.video_cfg,
         stg_scale=0.0,
         rescale_scale=0.45,
         modality_scale=3.0,
@@ -233,7 +235,7 @@ def main() -> int:
         actual_dur = round(nf / DEFAULT_FPS, 2)
         out_name = (
             f"run_skye_like_api__skye_helicopter_birthday_gili__"
-            f"{DEFAULT_WIDTH}x{DEFAULT_HEIGHT}_{DEFAULT_STEPS}steps_{actual_dur}s_seed{seed}.mp4"
+            f"{DEFAULT_WIDTH}x{DEFAULT_HEIGHT}_{DEFAULT_STEPS}steps_cfg{args.video_cfg}_{actual_dur}s_seed{seed}.mp4"
         )
         output_path = args.output_dir / out_name
 
