@@ -72,7 +72,7 @@ GEMMA_ROOT        = Path("/home/efrattaig/models/gemma-3-12b-it-qat-q4_0-unquant
 # ══════════════════════════════════════════════════════════════════════════════
 
 DEFAULT_DURATIONS  = [15.0]   # seconds — passed as --durations to override
-DEFAULT_SEED       = 200                 # seed 200 produces no hand movement
+DEFAULT_SEED       = 300                 # seed 300: no hand movement at 15s
 DEFAULT_FPS        = 25.0
 DEFAULT_WIDTH      = 768                 # stage-2 output; stage-1 uses half (384) — must be divisible by 64
 DEFAULT_HEIGHT     = 1024                # stage-2 output; stage-1 uses half (512) — must be divisible by 64
