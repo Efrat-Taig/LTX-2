@@ -320,6 +320,10 @@ def compute_captions_embeddings(  # noqa: PLR0913
                     )
 
                     output_rel_path = Path(batch["output_path"][i])
+                    # If the path is absolute (e.g. dataset uses absolute media_paths),
+                    # use only the filename to avoid pathlib discarding output_path.
+                    if output_rel_path.is_absolute():
+                        output_rel_path = Path(output_rel_path.name)
 
                     # Create output directory maintaining structure
                     output_dir_path = output_path / output_rel_path.parent
