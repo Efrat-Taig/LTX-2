@@ -1,449 +1,274 @@
-# LTX-2.3 LoRA Training: Deep Architecture Analysis
+# LTX-2.3 LoRA Training: Architecture & Training Guide
 
-*Generated from direct codebase inspection of `/Users/efrattaig/projects/sm/LTX-2` — all class names, line numbers,
-and parameter values are verified against the source.*
-
----
-
-## Executive Summary
-
-**What to train:** LoRA adapters on the `to_q`, `to_k`, `to_v`, and `to_out.0` linear projections inside **every
-attention module** across all 48 transformer blocks of `LTXModel`. This covers video self-attention, video–text
-cross-attention, audio self-attention, audio–text cross-attention, and the bidirectional audio↔video cross-attention
-layers — 28 distinct attention matrices per block, 1344 total targets.
-
-**Which checkpoint to target:** `ltx-2.3-22b-dev.safetensors` (22B parameters). This is the only checkpoint that
-activates the `cross_attention_adaln=True` path (prompt AdaLN on cross-attention), which is where LTX-2.3's improved
-prompt adherence lives. Training on the 19B checkpoint misses these layers entirely.
-
-**Goal-specific routing:**
-
-| Goal | Recommended Config | Target Modules |
-|---|---|---|
-| Style / appearance / character | `ltx2_av_lora.yaml` | `to_q`, `to_k`, `to_v`, `to_out.0` (all branches) |
-| Motion / temporal coherence | `ltx2_av_lora.yaml` + FFN layers | above + `ff.net.0.proj`, `ff.net.2` |
-| Video-conditioned transformation | `ltx2_v2v_ic_lora.yaml` | Video branches only (explicit `attn1.*`, `attn2.*`, `ff.*`) |
-| Audio style | `ltx2_av_lora.yaml` with `with_audio: true` | Above + `audio_attn*`, `audio_ff.*`, A↔V cross-attn |
-
-**VRAM requirements:** 80 GB+ for standard BF16 training; 32 GB+ with INT8 quantization + 8-bit AdamW.
+*Based on direct codebase inspection of `/Users/efrattaig/projects/sm/LTX-2`. All class names and parameter values are verified against the source.*
 
 ---
 
-## Architecture Map
+## What Is LoRA and Why Are We Using It?
 
-### Model Class Hierarchy
+The LTX-2.3 model has **22 billion parameters** — the numbers that define everything it knows about how video and audio look and sound. Retraining all of them from scratch on Skye footage would take weeks, cost thousands of dollars in compute, and likely destroy the general video-generation ability the model already has.
 
-```
-LTXModel                                   (ltx_core.model.transformer.model.LTXModel)
-└── transformer_blocks: nn.ModuleList[48]
-    └── BasicAVTransformerBlock × 48       (ltx_core.model.transformer.transformer.BasicAVTransformerBlock)
-        ├── VIDEO BRANCH
-        │   ├── attn1: Attention           (video self-attention)
-        │   ├── attn2: Attention           (video cross-attention to text)
-        │   ├── ff: FeedForward
-        │   └── scale_shift_table          (AdaLN params, shape [9, 4096] in LTX-2.3)
-        ├── AUDIO BRANCH
-        │   ├── audio_attn1: Attention     (audio self-attention)
-        │   ├── audio_attn2: Attention     (audio cross-attention to text)
-        │   ├── audio_ff: FeedForward
-        │   └── audio_scale_shift_table    (AdaLN params, shape [6, 2048])
-        └── AUDIO-VIDEO CROSS-ATTENTION
-            ├── audio_to_video_attn        (Q: video, K/V: audio)
-            ├── video_to_audio_attn        (Q: audio, K/V: video)
-            └── scale_shift_table_a2v_*    (AdaLN params for cross-modal gates)
-```
+**LoRA (Low-Rank Adaptation)** solves this by adding a tiny parallel layer next to certain existing layers in the model — instead of changing the original layer, you train a small "correction" on top of it. Concretely:
 
-Source files:
-- [transformer.py:24](packages/ltx-core/src/ltx_core/model/transformer/transformer.py#L24) — `BasicAVTransformerBlock`
-- [transformer.py:38](packages/ltx-core/src/ltx_core/model/transformer/transformer.py#L38) — `attn1` (video self-attn)
-- [transformer.py:48](packages/ltx-core/src/ltx_core/model/transformer/transformer.py#L48) — `attn2` (video cross-attn)
-- [transformer.py:63](packages/ltx-core/src/ltx_core/model/transformer/transformer.py#L63) — `audio_attn1`
-- [transformer.py:89](packages/ltx-core/src/ltx_core/model/transformer/transformer.py#L89) — `audio_to_video_attn`
+- The original weight matrix stays **completely frozen** (unchanged)
+- Next to it, two small matrices are inserted: `A` (input compressor) and `B` (output expander)
+- During training, only `A` and `B` learn. During inference: `output = original(x) + B(A(x)) * scale`
+- The rank parameter (e.g. rank=32) is the "bottleneck size" of `A` and `B` — lower rank = fewer parameters = faster but less capacity
+
+The result is a small `.safetensors` file (~50–200 MB) that teaches the model new concepts — in our case, Skye's appearance, voice, and movement — without modifying the base 22B weights at all.
 
 ---
 
-### The `Attention` Module (LoRA injection targets)
+## What Parts of the Model Do We Target?
 
-**File:** [attention.py:143](packages/ltx-core/src/ltx_core/model/transformer/attention.py#L143)
+### The Overall Structure
 
-```python
-class Attention(torch.nn.Module):
-    def __init__(self, query_dim, context_dim, heads, dim_head, ...):
-        inner_dim = dim_head * heads
+LTX-2.3 is a **Diffusion Transformer** — it generates video by starting from pure noise and gradually denoising it, step by step, guided by a text prompt. The "brain" of this process is a stack of **48 identical processing blocks**, each of which asks: *given what I know so far, how should I refine the video and audio at this denoising step?*
 
-        self.q_norm   = torch.nn.RMSNorm(inner_dim, eps=norm_eps)   # line 165
-        self.k_norm   = torch.nn.RMSNorm(inner_dim, eps=norm_eps)   # line 166
+Each block handles both video and audio simultaneously and contains several **attention modules** plus a **feed-forward network**:
 
-        self.to_q     = torch.nn.Linear(query_dim,   inner_dim)     # line 168  ← LoRA target
-        self.to_k     = torch.nn.Linear(context_dim, inner_dim)     # line 169  ← LoRA target
-        self.to_v     = torch.nn.Linear(context_dim, inner_dim)     # line 170  ← LoRA target
-        self.to_out   = nn.Sequential(Linear(inner_dim, query_dim), # line 178  ← LoRA target
-                                      nn.Identity())
+```
+LTXModel
+└── 48 transformer blocks, each containing:
+    ├── VIDEO BRANCH
+    │   ├── attn1  — video self-attention
+    │   ├── attn2  — video attends to text prompt
+    │   └── ff     — video feed-forward network
+    ├── AUDIO BRANCH
+    │   ├── audio_attn1  — audio self-attention
+    │   ├── audio_attn2  — audio attends to text prompt
+    │   └── audio_ff     — audio feed-forward network
+    └── AUDIO↔VIDEO CROSS-ATTENTION
+        ├── audio_to_video_attn  — video attends to audio
+        └── video_to_audio_attn  — audio attends to video
 ```
 
-**Why these four and not `q_norm`/`k_norm`?** RMSNorm has no weight matrix with a suitable low-rank decomposition.
-LoRA works by inserting `B @ A` deltas into weight matrices. The `to_q`, `to_k`, `to_v`, and `to_out.0` projections
-are all `nn.Linear` and are the canonical targets across every DiT-family model.
+### What Is Attention?
 
-**Attention dimensions per branch:**
+Attention is how the model figures out which parts of the input should influence each other. You can think of it as a "routing" system: for each position in the video (a pixel region at a given time), attention decides which other positions are most relevant and how much to draw from them.
 
-| Branch | Module prefix | query_dim | context_dim | heads | dim_head | inner_dim |
-|---|---|---|---|---|---|---|
-| Video self-attn | `attn1` | 4096 | 4096 (self) | 32 | 128 | 4096 |
-| Video cross-attn | `attn2` | 4096 | 4096 (text) | 32 | 128 | 4096 |
-| Audio self-attn | `audio_attn1` | 2048 | 2048 (self) | 32 | 64 | 2048 |
-| Audio cross-attn | `audio_attn2` | 2048 | 2048 (text) | 32 | 64 | 2048 |
-| A→V cross-attn | `audio_to_video_attn` | 4096 (video Q) | 2048 (audio K/V) | 32 | 64 | 2048 |
-| V→A cross-attn | `video_to_audio_attn` | 2048 (audio Q) | 4096 (video K/V) | 32 | 64 | 2048 |
+Each attention module does this with three learnable projections:
+- **Q (Query)** — "what am I looking for?"
+- **K (Key)** — "what does each other position offer?"
+- **V (Value)** — "what information does each position actually contain?"
+
+The match between Q and K determines how much attention is paid; then V is retrieved accordingly. These are implemented as simple linear layers (`to_q`, `to_k`, `to_v`, `to_out`), which is exactly why they're good LoRA targets — they're the decision-making weights.
+
+**The six attention types in each block:**
+
+| Module | What it does |
+|--------|-------------|
+| `attn1` (video self-attn) | Video frames attend to each other — spatial and temporal consistency |
+| `attn2` (video cross-attn) | Video attends to the text prompt — "does this frame match the description?" |
+| `audio_attn1` (audio self-attn) | Audio segments attend to each other — temporal audio coherence |
+| `audio_attn2` (audio cross-attn) | Audio attends to the text prompt — "does this sound match the description?" |
+| `audio_to_video_attn` | Video frames attend to audio — "what does the audio say the video should look like?" |
+| `video_to_audio_attn` | Audio attends to video — "what should the audio sound like given what's on screen?" |
+
+### What We Actually Train
+
+We apply LoRA to the `to_q`, `to_k`, `to_v`, and `to_out.0` linear layers **inside every attention module** across all 48 blocks. That covers all six attention types above — 28 weight matrices per block × 48 blocks = 1,344 total layers modified.
+
+**Why these four and not others?** Because they are `nn.Linear` layers (simple matrix multiplications), which is exactly what LoRA's `B @ A` structure can augment. The normalization layers next to them (`q_norm`, `k_norm`) use a different mathematical structure (RMSNorm) that doesn't have a weight matrix LoRA can meaningfully wrap.
+
+In the config, you just write:
+```yaml
+lora:
+  target_modules: ["to_q", "to_k", "to_v", "to_out.0"]
+```
+The training framework (PEFT) automatically finds every layer in the model whose name ends with these strings and injects LoRA into all of them.
+
+### Feed-Forward Layers (Optional)
+
+Each block also has a **feed-forward network (FFN)** — two linear layers with a nonlinearity between them. The FFN processes each position independently after attention, acting like a "memory" that stores associations. For video, it's `4096 → 16384 → 4096` dimensions.
+
+You can also add LoRA to the FFN (`ff.net.0.proj`, `ff.net.2`). This increases the model's capacity to learn the new concept but also increases training time and the risk of overfitting.
+
+**Rule of thumb:**
+- Attention-only LoRA → good for character appearance, voice consistency
+- Attention + FFN LoRA → needed only if the character's *motion style* or *behavior* isn't being captured
 
 ---
 
-### The `FeedForward` Module
+## Why LTX-2.3 (22B) and Not the Older 19B Model
 
-**File:** [feed_forward.py](packages/ltx-core/src/ltx_core/model/transformer/feed_forward.py)
+The 22B model has a feature called **`cross_attention_adaln`** that the 19B model does not. Here's what this means:
 
-```
-FeedForward (dim=4096, dim_out=4096, mult=4):
-  ff.net.0 = GELUApprox:
-    ff.net.0.proj = Linear(4096, 16384)    ← LoRA target (optional)
-  ff.net.1 = Identity()
-  ff.net.2 = Linear(16384, 4096)           ← LoRA target (optional)
-```
+In attention modules, the model also conditions on **how noisy the current video is** (a signal called `sigma` — high at the start of denoising, near zero at the end). In LTX-2.3, this noise level is used to dynamically scale and shift the attention computation itself at every block — a technique called **AdaLN (Adaptive Layer Normalization)**. It's like the model automatically adjusting its "confidence" in the text prompt based on how far along in the denoising process it is.
 
-FFN adds significant parameter count — enable it only if your task requires substantial style shift. Attention-only
-LoRA is sufficient for character/subject consistency.
+The 19B model doesn't do this — its cross-attention is noise-level-agnostic. The 22B model's improved prompt-following behavior (more faithful to what you described in text) comes directly from this mechanism.
 
----
+**Why this matters for LoRA:** A LoRA trained on the 19B model cannot be transferred to the 22B model because the weight structures are different. And if you're using 22B for inference, you must train on 22B. The correct checkpoint is `ltx-2.3-22b-dev.safetensors`.
 
-### Full PEFT Module Name Map (per block N = 0…47)
+Other 22B improvements over 19B:
+| Component | 19B | 22B |
+|-----------|-----|-----|
+| Text conditioning per block | Fixed | Dynamically scaled by noise level |
+| Text → video/audio routing | Single stream for both | Separate pathways for video vs. audio |
+| Audio quality | HiFi-GAN vocoder | BigVGAN v2 + bandwidth extension (better quality, wider freq range) |
 
-```
-transformer_blocks.N.attn1.to_q
-transformer_blocks.N.attn1.to_k
-transformer_blocks.N.attn1.to_v
-transformer_blocks.N.attn1.to_out.0
-transformer_blocks.N.attn2.to_q
-transformer_blocks.N.attn2.to_k
-transformer_blocks.N.attn2.to_v
-transformer_blocks.N.attn2.to_out.0
-transformer_blocks.N.ff.net.0.proj          (optional)
-transformer_blocks.N.ff.net.2               (optional)
-transformer_blocks.N.audio_attn1.to_q
-transformer_blocks.N.audio_attn1.to_k
-transformer_blocks.N.audio_attn1.to_v
-transformer_blocks.N.audio_attn1.to_out.0
-transformer_blocks.N.audio_attn2.to_q
-transformer_blocks.N.audio_attn2.to_k
-transformer_blocks.N.audio_attn2.to_v
-transformer_blocks.N.audio_attn2.to_out.0
-transformer_blocks.N.audio_ff.net.0.proj    (optional)
-transformer_blocks.N.audio_ff.net.2         (optional)
-transformer_blocks.N.audio_to_video_attn.to_q
-transformer_blocks.N.audio_to_video_attn.to_k
-transformer_blocks.N.audio_to_video_attn.to_v
-transformer_blocks.N.audio_to_video_attn.to_out.0
-transformer_blocks.N.video_to_audio_attn.to_q
-transformer_blocks.N.video_to_audio_attn.to_k
-transformer_blocks.N.video_to_audio_attn.to_v
-transformer_blocks.N.video_to_audio_attn.to_out.0
-```
-
-**Shorthand trick:** Using `"to_k"`, `"to_q"`, `"to_v"`, `"to_out.0"` as PEFT `target_modules` matches ALL of the
-above in a single pass because PEFT does suffix matching across the full module tree. This is the pattern used in the
-official configs.
+Version detection is automatic — the trainer reads the model's internal config and picks the right code path without any manual switches.
 
 ---
 
-### LTX-2.3 vs LTX-2 (19B): Why 22B Is the Right Base
+## Training Parameters Explained
 
-| Component | LTX-2 (19B) | LTX-2.3 (22B) |
-|---|---|---|
-| `cross_attention_adaln` | `False` | `True` |
-| AdaLN params per block | `[6, 4096]` | `[9, 4096]` — 3 extra for CA modulation |
-| `prompt_scale_shift_table` | absent | present per block (shape `[2, 4096]`) |
-| Feature extractor | `FeatureExtractorV1` — single stream, same embed for video & audio | `FeatureExtractorV2` — separate `video_aggregate_embed` + `audio_aggregate_embed`, per-token RMSNorm |
-| Caption projection | Inside transformer | Inside text encoder; transformer has NO `caption_projection` module |
-| Vocoder | HiFi-GAN | BigVGAN v2 + bandwidth extension (`VocoderWithBWE`) |
+### Rank and Alpha
 
-**Why this matters for LoRA:** `cross_attention_adaln=True` means the 22B model modulates cross-attention Q/K/V via
-sigma-conditioned AdaLN at every block. A LoRA trained on the 19B checkpoint cannot learn these modulation paths and
-will not transfer to 22B without retraining. The `ltx-2.3-22b-dev.safetensors` checkpoint is the only one that
-activates this code path in `model_configurator.py`.
+**Rank** is the bottleneck size of the LoRA matrices. Higher rank = more parameters = more capacity to learn, but also slower training and higher overfitting risk.
 
-Version detection is **automatic**: `ltx-core` reads the config embedded in the safetensors file and selects
-`FeatureExtractorV1` vs `V2`, `Vocoder` vs `VocoderWithBWE`, and the AdaLN coefficient count without any
-trainer-side version checks.
+- Rank 16 → ~50M trainable parameters — good for a fast validation run
+- Rank 32 → ~100M trainable parameters — standard for character LoRA
+- Rank 64 → ~200M parameters — only if rank 32 is clearly underfitting
 
----
+**Alpha** controls how strongly the LoRA correction is applied. The scale factor is `alpha / rank`. With `alpha = rank` (our setup), this equals 1.0 — meaning the LoRA correction is added at full strength. Increasing alpha relative to rank amplifies the LoRA; decreasing it dampens it. Start with `alpha = rank` and don't touch it unless results are too weak or overfit.
 
-## Training Parameters
+### Learning Rate
 
-### Official Recommended Hyperparameters
+`1e-4` is the standard for LoRA training. This means the weights move 0.0001 of the gradient direction per step — small enough to not destroy what the model already knows, large enough to make meaningful progress.
 
-Sourced directly from [ltx2_av_lora.yaml](packages/ltx-trainer/configs/ltx2_av_lora.yaml) and
-[ltx2_v2v_ic_lora.yaml](packages/ltx-trainer/configs/ltx2_v2v_ic_lora.yaml):
+### Steps
 
-| Parameter | Audio-Video LoRA | IC-LoRA (V2V) | Low-VRAM AV | Notes |
-|---|---|---|---|---|
-| `rank` | **32** | **32** | **16** | Start here; 64 for high-detail tasks |
-| `alpha` | **32** | **32** | **16** | Keep = rank for neutral scaling |
-| `dropout` | 0.0 | 0.0 | 0.0 | Only add if overfitting |
-| `learning_rate` | **1e-4** | **2e-4** | 1e-4 | IC-LoRA uses higher LR; AV is conservative |
-| `steps` | **2000** | **3000** | 2000 | IC-LoRA needs more steps for V2V concept |
-| `batch_size` | 1 | 1 | 1 | Effective batch = 1 per GPU |
-| `gradient_accumulation_steps` | 1 | 1 | 1 | Scale up for multi-GPU |
-| `max_grad_norm` | 1.0 | 1.0 | 1.0 | Standard clip |
-| `optimizer_type` | `adamw` | `adamw` | `adamw8bit` | 8-bit saves ~75% optimizer VRAM |
-| `scheduler_type` | `linear` | `linear` | `linear` | Cosine also viable |
-| `mixed_precision_mode` | **bf16** | **bf16** | bf16 | Never fp16 — numerical instability |
-| `quantization` | `null` | `null` | `int8-quanto` | INT8 cuts base model VRAM ~50% |
-| `enable_gradient_checkpointing` | `true` | `true` | `true` | Always enable for 22B |
-| `load_text_encoder_in_8bit` | `true` | `false` | `true` | Gemma can OOM during long prompt validation |
-| `checkpoint precision` | `bfloat16` | `bfloat16` | `bfloat16` | Saves disk; reload in BF16 for inference |
+With 409 clips, the key question is how many times the model sees each clip. At batch_size=1:
+- 1000 steps → each clip seen ~2.4 times on average
+- 2500 steps → each clip seen ~6 times
+- 5000 steps → ~12 times
 
-### Precision Notes
+More steps = better character memorization, but also higher overfitting risk if the concept is narrow. The validation videos at each checkpoint are how you know when to stop.
 
-- **Training precision: BF16.** The model was trained in BF16. FP16 causes overflow at these scales. FP32 doubles VRAM.
-- **FP8 at inference only.** The `fuse_loras.py` loader supports FP8 weight types (`apply_loras()` handles
-  `cast-only FP8` and `scaled FP8` with per-tensor scale), but this is only for inference-time LoRA fusion — **do not
-  train in FP8**. Source: [fuse_loras.py](packages/ltx-core/src/ltx_core/loader/fuse_loras.py).
-- **LoRA alpha/rank=1 scaling.** With `alpha=rank`, the effective scale factor is `alpha/rank = 1.0`. This is the
-  safest default. Increasing `alpha` with fixed `rank` amplifies the LoRA contribution — use only when under-fitting.
+### Precision: Always BF16
+
+**BF16 (bfloat16)** is a 16-bit number format designed for deep learning. It has a wider range than FP16 (regular 16-bit) but lower decimal precision. For a 22B model:
+
+- **FP32** (full 32-bit): 2× the VRAM of BF16, no meaningful quality gain for this use case
+- **BF16**: The right choice — what the model was originally trained in
+- **FP16**: Do not use — the model produces NaN (not-a-number) errors at this scale due to numerical overflow
+
+**Gradient checkpointing** (`enable_gradient_checkpointing: true`) trades compute for memory: instead of keeping all intermediate activations in GPU memory during the backward pass, it recomputes them on the fly. This cuts VRAM by ~40% at the cost of ~20% slower training. Always enable for a 22B model.
 
 ### Timestep Sampling
 
-Use `timestep_sampling_mode: "shifted_logit_normal"` (default in all official configs). This mode:
-- Shifts the noise distribution based on sequence length (longer/higher-res videos get proportionally more high-noise
-  training signal)
-- Applies percentile stretching to improve `[0, 1]` coverage
-- Adds a 10% uniform fallback to prevent distribution collapse
+During training, each video is artificially noised to a random level (from almost clean to pure noise), and the model learns to predict what was added. The **timestep** represents how noisy the sample is.
 
-Source: [timestep_samplers.py](packages/ltx-trainer/src/ltx_trainer/timestep_samplers.py) —
-`ShiftedLogitNormalTimestepSampler`
+We use `shifted_logit_normal` sampling, which samples timesteps with higher weight toward the middle of the noise range (not too clean, not too noisy) — this is where the most useful learning signal for appearance and identity lives. It also adjusts this distribution based on video length, since longer videos need more signal at high noise levels to learn global structure.
 
 ---
 
-## Dataset Strategy
+## Data Pipeline
 
-### Data Pipeline Overview
-
-Training uses pre-encoded latents, not raw video. The pipeline is:
+Training never uses raw video directly. Everything is pre-encoded into compact representations ("latents") before training begins. This is done once and then the latents are reused for every training step, which is why preprocessing takes hours but training is relatively fast per step.
 
 ```
-Raw Videos → VAE Encoder → latents/          (128-channel video latent tensors)
-Raw Videos → Gemma + FE  → conditions/       (text embedding features, blocks 1+2 only)
-Raw Audio  → Audio VAE   → audio_latents/    (8-channel audio latent tensors)
+Raw video  → Video VAE encoder   → latents/         (video latents, ~99% smaller than raw video)
+Text prompt → Gemma 12B LLM      → conditions/      (text embeddings — the model's understanding of your caption)
+Raw audio  → Audio VAE encoder   → audio_latents/   (audio latents)
 ```
 
-Block 3 (embeddings connectors) is applied **during training** via the `EmbeddingsProcessor`. This means you only need
-to rerun preprocessing once and the connector is applied on the fly per step.
+The preprocessed directory must have all three folders with matching filenames before training can start.
 
-### Dataset Directory Structure
+**Why pre-encode?** The VAE (encoder/decoder) and text encoder together use ~20GB of VRAM. By running them once offline, training only needs to load the transformer + LoRA — much more VRAM-efficient.
 
-**For text-to-video / audio-video LoRA:**
+**Video shape constraints** come from the VAE's compression ratios:
+- Spatial: 32× reduction (a 960×544 video becomes a 30×17 latent grid)
+- Temporal: 8× reduction, plus the formula requires `frames % 8 == 1` (so 49, 97, etc. — not 48 or 96)
+
+### Caption Strategy
+
+LTX-2.3 uses **Gemma 3 12B** as its text encoder — a large language model that processes your caption into a rich semantic representation. The model was trained with very long, detailed captions (100–250 words describing both visual and audio content), so short prompts produce noticeably weaker conditioning.
+
+Our captions combine Skye's transcript with the scene description:
 ```
-preprocessed_data_root/
-├── latents/           # .safetensors files — shape [128, F, H//32, W//32]
-├── conditions/        # .safetensors files — video_prompt_embeds, audio_prompt_embeds, prompt_attention_mask
-└── audio_latents/     # .safetensors files — shape [8, T_audio] (only if with_audio: true)
+SKYE says "Where are you going, silly goose?". A fixed medium close-up shot frames Skye, a golden-brown pup...
 ```
-
-**For IC-LoRA (video-to-video):**
-```
-preprocessed_data_root/
-├── latents/           # target video latents
-├── conditions/        # text embeddings
-└── reference_latents/ # reference/conditioning video latents
-```
-
-### Video Requirements
-
-| Constraint | Value | Source |
-|---|---|---|
-| Frame count | `frames % 8 == 1` | `SpatioTemporalScaleFactors.default()` |
-| Valid frame counts | 1, 9, 17, 25, 33, 41, 49, 57, 65, 73, 81, 89, 97… | |
-| Width | divisible by 32 | `VideoLatentShape` |
-| Height | divisible by 32 | `VideoLatentShape` |
-| Spatial compression | 32× (H and W in latent space) | |
-| Temporal compression | 8× (frames in latent space) | |
-| Latent channels | 128 | `in_channels` in LTXModel |
-
-**Recommended training resolution:** 576×576 at 89 frames (≈3.5 sec at 25 fps) — this is what the official
-validation config uses. For character consistency, 512×512 at 49 frames is faster to encode and still effective.
-
-### Caption / Prompt Strategy
-
-LTX-2.3 uses Gemma-3-12B and benefits significantly from **long, detailed prompts** (100–250 words). The text
-encoder was trained with prompts describing both visual content and audio simultaneously. Short prompts
-(< 20 words) produce significantly weaker conditioning.
-
-**Process captions with:**
-```bash
-uv run python packages/ltx-trainer/scripts/caption_videos.py <input_dir> <output_dir>
-uv run python packages/ltx-trainer/scripts/process_captions.py <video_dir> <output_dir> \
-    --model-path models/ltx-2.3-22b-dev.safetensors \
-    --text-encoder-path models/gemma-3-12b-it-qat-q4_0-unquantized
-```
-
-The `process_captions.py` script runs only Gemma (blocks 1+2) and saves `video_prompt_embeds` +
-`audio_prompt_embeds` — these are the new-format embeddings expected by the trainer. Legacy `prompt_embeds`
-(single key) is still supported via backward-compat in `trainer.py:_training_step()`.
-
-### Minimum Dataset Size
-
-- **Concept/style LoRA:** 20–50 videos of 3–10 seconds each
-- **Character consistency:** 50–150 videos showing the character in varied motion, lighting, angle
-- **IC-LoRA (transformation):** 30–100 paired (reference, target) video clips
-
-More data is always better. Avoid duplicate or near-duplicate clips — they cause overfitting at low step counts.
+This tells the model simultaneously what Skye looks like, what she's doing, and what she's saying — all three dimensions we want the LoRA to learn.
 
 ---
 
-## PEFT Integration: How LoRA Is Applied
+## VRAM Requirements
 
-**File:** [trainer.py:12](packages/ltx-trainer/src/ltx_trainer/trainer.py#L12)
+| Setup | Peak VRAM | Who it's for |
+|-------|-----------|--------------|
+| Standard BF16, no quantization | ~80 GB | A100/H100 80GB |
+| INT8 quantization (`int8-quanto`) | ~40–50 GB | A100 40GB |
+| 8-bit text encoder only (`load_text_encoder_in_8bit`) | ~55–60 GB | Our current setup |
 
-```python
-from peft import LoraConfig, get_peft_model
-
-lora_config = LoraConfig(
-    r=self._config.lora.rank,           # e.g., 32
-    lora_alpha=self._config.lora.alpha, # e.g., 32
-    target_modules=self._config.lora.target_modules,  # e.g., ["to_q", "to_k", "to_v", "to_out.0"]
-    lora_dropout=self._config.lora.dropout,
-    init_lora_weights=True,
-)
-self._transformer = get_peft_model(self._transformer, lora_config)
-```
-
-PEFT wraps matching `nn.Linear` layers with `LoraLinear` modules. During forward: `out = base(x) + lora_B(lora_A(x)) * scale`. During save: only `lora_A.weight` and `lora_B.weight` are written.
-
-**LoRA state dict key format** (as written to `.safetensors`):
-```
-transformer_blocks.0.attn1.to_q.lora_A.weight   shape: [rank, query_dim]
-transformer_blocks.0.attn1.to_q.lora_B.weight   shape: [query_dim, rank]
-```
-
-**Inference fusion** via `fuse_loras.py`: the `apply_loras()` function merges `B @ A * strength` directly into the
-base weight tensor at load time. Supports BF16, cast-only FP8, and scaled FP8 base weights.
+Our server has an 80GB GPU. The dry run peaked at **49.5 GB** with the 8-bit text encoder loaded during validation. During training proper (text encoder unloaded), it will be slightly less. We're well within limits.
 
 ---
 
-## Spatio-Temporal Guidance (STG) During Validation
+## What Happens at Validation
 
-STG is a perturbation-based guidance technique unique to LTX. It skips attention in a specific block for one CFG
-branch, improving temporal coherence without extra training.
+Every N steps (set by `interval`), training pauses and the model generates a video from each validation prompt. This is your feedback loop:
 
-**Recommended inference-time config (from all three official YAML files):**
+- **Step 100–300:** Very early — characters look generic, but color palette and rough motion style may start to appear
+- **Step 500–1000:** Character should be recognizable — pink/lavender coloring, correct body shape
+- **Step 2000–2500:** Fine details — facial expressions, flight sequences, voice character
+
+The validation videos are logged to W&B so you can watch the progression over time without having to download anything.
+
+---
+
+## Spatio-Temporal Guidance (STG)
+
+STG is a technique used only at **inference time** (validation and production), not during training. It improves temporal coherence — preventing the generated video from flickering or losing consistency frame to frame.
+
+How it works: the model runs two forward passes. In the second pass, it intentionally skips the self-attention in one specific block (block 29 out of 48). The difference between the two outputs is used as an extra "coherence signal" that gets blended back in. Think of it as the model comparing what it produces normally vs. what it produces when it deliberately ignores short-range temporal patterns — and using that contrast to reinforce consistency.
+
+The recommended settings (from Lightricks testing):
 ```yaml
-stg_scale: 1.0
-stg_blocks: [29]    # block index 29 of 48
-stg_mode: "stg_av"  # "stg_av" for AV training, "stg_v" for video-only
+stg_scale: 1.0      # how strongly to apply the coherence boost
+stg_blocks: [29]    # which block to perturb (mid-to-late = best empirically)
+stg_mode: "stg_av"  # apply to both audio and video branches
 ```
 
-**Perturbation types** (`PerturbationType` enum in `guidance/perturbations.py`):
-- `SKIP_VIDEO_SELF_ATTN` — skips `attn1` at the perturbation block
-- `SKIP_AUDIO_SELF_ATTN` — skips `audio_attn1`
-- `SKIP_A2V_CROSS_ATTN` — skips `audio_to_video_attn`
-- `SKIP_V2A_CROSS_ATTN` — skips `video_to_audio_attn`
-
-`stg_av` triggers all four; `stg_v` triggers only `SKIP_VIDEO_SELF_ATTN`.
-
-Block 29 (mid-to-late, out of 48) is the empirically recommended perturbation site based on Lightricks internal
-testing. Different blocks can be tried if artifact patterns emerge.
+You never need to tune these for character LoRA training.
 
 ---
 
-## Proof & References
+## Why Not Train the VAE or Text Encoder?
 
-### Codebase Evidence
+**Video VAE:** Handles the compression and reconstruction of pixels. LoRA here would affect how sharp or artifact-free the video looks, not what the video *depicts*. Training this for a character is the wrong lever.
 
-| Claim | File | Lines |
-|---|---|---|
-| `LTXModel` uses 48 blocks, `inner_dim=4096` for video | [model_configurator.py](packages/ltx-core/src/ltx_core/model/transformer/model_configurator.py) | `num_layers=48`, `num_attention_heads=32`, `attention_head_dim=128` |
-| `Attention` has `to_q`, `to_k`, `to_v`, `to_out` as `nn.Linear` | [attention.py:165-178](packages/ltx-core/src/ltx_core/model/transformer/attention.py#L165) | Exact constructor |
-| `BasicAVTransformerBlock` has all 6 attention submodules | [transformer.py:38-130](packages/ltx-core/src/ltx_core/model/transformer/transformer.py#L38) | `attn1`, `attn2`, `audio_attn1`, `audio_attn2`, `audio_to_video_attn`, `video_to_audio_attn` |
-| PEFT `LoraConfig` used for training | [trainer.py:12](packages/ltx-trainer/src/ltx_trainer/trainer.py#L12) | `from peft import LoraConfig, get_peft_model` |
-| Official target_modules: `["to_k","to_q","to_v","to_out.0"]` | [ltx2_av_lora.yaml:81-88](packages/ltx-trainer/configs/ltx2_av_lora.yaml#L81) | lora.target_modules |
-| IC-LoRA targets explicit video modules + FFN | [ltx2_v2v_ic_lora.yaml:82-95](packages/ltx-trainer/configs/ltx2_v2v_ic_lora.yaml#L82) | `attn1.*`, `attn2.*`, `ff.net.*` |
-| LTX-2.3 `cross_attention_adaln=True` (22B only) | [CLAUDE.md table](packages/ltx-trainer/CLAUDE.md) | "Prompt AdaLN: Active" for 22B only |
-| BF16 mixed precision is mandatory | All three YAML configs | `mixed_precision_mode: "bf16"` |
-| `shifted_logit_normal` timestep sampling | All three YAML configs | `timestep_sampling_mode: "shifted_logit_normal"` |
-| FP8 is inference-only (LoRA fusion) | [fuse_loras.py](packages/ltx-core/src/ltx_core/loader/fuse_loras.py) | `apply_loras()` handles FP8 base weights |
-| STG block 29 recommended | [ltx2_av_lora.yaml:233](packages/ltx-trainer/configs/ltx2_av_lora.yaml#L233) | `stg_blocks: [29]` |
+**Gemma text encoder:** Already rich at 12B parameters. Fine-tuning it risks "breaking" its general language understanding (it might forget what "helicopter" means in a broader context). The right approach is to train the transformer's cross-attention projections (`attn2.to_k`, `attn2.to_v`) — these are the interface between the text understanding (which stays frozen) and the video generation (which adapts). This is exactly what we're doing.
 
-### Key Data Flow Proof
-
-The `Modality` dataclass (the model's input interface) confirms both video and audio branches receive separate sigma
-and position embeddings — meaning a LoRA trained only on video branches will NOT influence audio generation and vice
-versa. To achieve audio-visual consistency, always use the full AV config:
-
-```python
-# From packages/ltx-core/src/ltx_core/model/transformer/modality.py
-video_pred, audio_pred = model(video=video_modality, audio=audio_modality, perturbations=None)
-```
-
-### Why Not Train the VAE or Text Encoder?
-
-- **VAE (VideoEncoder/VideoDecoder):** Encodes/decodes pixel space. LoRA here affects reconstruction quality, not
-  semantic content. Out of scope for character/style/motion control.
-- **GemmaTextEncoder:** The text conditioning is already rich at 12B params. Fine-tuning it is expensive and risky
-  — it can break general language understanding. The cross-attention projections in the transformer (`attn2.to_k`,
-  `attn2.to_v`) are the correct place to align new concepts to existing text understanding.
-- **Vocoder (BigVGAN v2):** Generates waveforms from mel spectrograms. LoRA here would affect audio timbre/quality,
-  not semantic audio content.
+**BigVGAN vocoder:** Converts the model's internal audio representation to actual waveforms. LoRA here would affect audio quality/timbre at a low level. Character voice is better learned through the audio attention modules in the transformer.
 
 ---
 
-## Quick-Start Config (Character/Style LoRA on LTX-2.3)
+## Quick Reference: Our Experiment Configs
 
-```yaml
-model:
-  model_path: "/path/to/models/ltx-2.3-22b-dev.safetensors"
-  text_encoder_path: "/path/to/models/gemma-3-12b-it-qat-q4_0-unquantized"
-  training_mode: "lora"
-
-lora:
-  rank: 32
-  alpha: 32
-  dropout: 0.0
-  target_modules:
-    - "to_k"
-    - "to_q"
-    - "to_v"
-    - "to_out.0"
-
-training_strategy:
-  name: "text_to_video"
-  first_frame_conditioning_p: 0.5
-  with_audio: true
-
-optimization:
-  learning_rate: 1e-4
-  steps: 2000
-  batch_size: 1
-  gradient_accumulation_steps: 1
-  max_grad_norm: 1.0
-  optimizer_type: "adamw"
-  scheduler_type: "linear"
-  enable_gradient_checkpointing: true
-
-acceleration:
-  mixed_precision_mode: "bf16"
-  quantization: null          # set "int8-quanto" if VRAM < 80GB
-  load_text_encoder_in_8bit: true
-
-flow_matching:
-  timestep_sampling_mode: "shifted_logit_normal"
-```
-
-Run with:
-```bash
-uv run accelerate launch packages/ltx-trainer/scripts/train.py my_config.yaml
-```
+| Config | Rank | Steps | Key Difference | When to Use |
+|--------|------|-------|----------------|-------------|
+| `skye_dryrun.yaml` | 16 | 100 | 10 clips only | ✅ Pipeline validation (done) |
+| `skye_exp1_baseline.yaml` | 16 | 1000 | Fast check on full data | First real run — go/no-go |
+| `skye_exp2_standard.yaml` | 32 | 2500 | Primary experiment | Main character LoRA |
+| `skye_exp3_highcap.yaml` | 32 | 3000 | + FFN layers | Only if exp2 underfits |
+| `skye_exp4_i2v.yaml` | 32 | 2500 | 80% image conditioning | Production I2V workflow |
 
 ---
 
-*All findings are derived from the local codebase at `/Users/efrattaig/projects/sm/LTX-2`. No external community
-benchmarks were available at time of writing — the above parameters are the official Lightricks defaults and should
-be treated as the authoritative starting point.*
+## Appendix: Full Module Name Map (for reference)
+
+Each of the 48 transformer blocks contains these LoRA-targeted layers (N = 0 to 47):
+
+```
+transformer_blocks.N.attn1.to_q              ← video self-attn: query
+transformer_blocks.N.attn1.to_k              ← video self-attn: key
+transformer_blocks.N.attn1.to_v              ← video self-attn: value
+transformer_blocks.N.attn1.to_out.0          ← video self-attn: output projection
+transformer_blocks.N.attn2.to_q/k/v/to_out.0  ← video cross-attn (to text)
+transformer_blocks.N.audio_attn1.*            ← audio self-attn
+transformer_blocks.N.audio_attn2.*            ← audio cross-attn (to text)
+transformer_blocks.N.audio_to_video_attn.*    ← audio→video cross-modal
+transformer_blocks.N.video_to_audio_attn.*    ← video→audio cross-modal
+transformer_blocks.N.ff.net.0.proj            ← video FFN (optional LoRA)
+transformer_blocks.N.ff.net.2                 ← video FFN (optional LoRA)
+transformer_blocks.N.audio_ff.net.0.proj      ← audio FFN (optional LoRA)
+transformer_blocks.N.audio_ff.net.2           ← audio FFN (optional LoRA)
+```
+
+Writing `target_modules: ["to_q", "to_k", "to_v", "to_out.0"]` in the config matches all of the non-optional rows above automatically — the framework does suffix matching across the entire model tree.
+
+---
+
+*All findings derived from the local codebase. Parameters are the official Lightricks defaults and should be treated as the authoritative starting point.*
