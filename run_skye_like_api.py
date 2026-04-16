@@ -184,12 +184,16 @@ def main() -> int:
                         help="Skip audio generation (faster, same video quality).")
     parser.add_argument("--video-cfg", type=float, default=DEFAULT_VIDEO_CFG,
                         help="Video guidance scale (CFG).")
+    parser.add_argument("--image", type=Path, default=DEFAULT_IMAGE,
+                        help="Start frame image path.")
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     args = parser.parse_args()
 
+    image_path = args.image
+
     # Validate
-    if not DEFAULT_IMAGE.exists():
-        print(f"ERROR: start frame not found: {DEFAULT_IMAGE}", file=sys.stderr)
+    if not image_path.exists():
+        print(f"ERROR: start frame not found: {image_path}", file=sys.stderr)
         return 1
     missing = [p for p in (CHECKPOINT, DISTILLED_LORA, SPATIAL_UPSAMPLER, GEMMA_ROOT)
                if not p.exists()]
@@ -219,7 +223,7 @@ def main() -> int:
     generate_audio = not args.no_audio
 
     print("\nrun_skye_like_api — TI2VidTwoStagesHQPipeline")
-    print(f"  image     : {DEFAULT_IMAGE}")
+    print(f"  image     : {image_path}")
     print(f"  stage-1   : {DEFAULT_WIDTH // 2} × {DEFAULT_HEIGHT // 2}  ({DEFAULT_STEPS} Res2s steps)")
     print(f"  stage-2   : {DEFAULT_WIDTH} × {DEFAULT_HEIGHT}  (2× upsample + distilled LoRA)")
     print(f"  fps       : {DEFAULT_FPS}  |  durations: {args.durations} s")
@@ -234,8 +238,9 @@ def main() -> int:
         seed = args.seed
         nf = frames_for_duration(dur, DEFAULT_FPS)
         actual_dur = round(nf / DEFAULT_FPS, 2)
+        img_tag = image_path.stem.replace(" ", "_")[:40]
         out_name = (
-            f"run_skye_like_api__skye_helicopter_birthday_gili__"
+            f"run_skye_like_api__{img_tag}__"
             f"{DEFAULT_WIDTH}x{DEFAULT_HEIGHT}_{DEFAULT_STEPS}steps_cfg{args.video_cfg}_{actual_dur}s_seed{seed}.mp4"
         )
         output_path = args.output_dir / out_name
@@ -254,7 +259,7 @@ def main() -> int:
                 steps=DEFAULT_STEPS,
                 video_guider_params=video_guider_params,
                 audio_guider_params=audio_guider_params,
-                image_path=DEFAULT_IMAGE,
+                image_path=image_path,
                 output_path=output_path,
                 generate_audio=generate_audio,
             )
