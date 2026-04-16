@@ -72,8 +72,8 @@ GEMMA_ROOT        = Path("/home/efrattaig/models/gemma-3-12b-it-qat-q4_0-unquant
 
 DEFAULT_DURATIONS  = [10.0]   # seconds — passed as --durations to override
 DEFAULT_FPS        = 25.0
-DEFAULT_WIDTH      = 1920                # stage-2 output; stage-1 uses half (960)
-DEFAULT_HEIGHT     = 1088                # stage-2 output; stage-1 uses half (544)
+DEFAULT_WIDTH      = 800                 # stage-2 output; stage-1 uses half (400)
+DEFAULT_HEIGHT     = 1024                # stage-2 output; stage-1 uses half (512)
 DEFAULT_STEPS      = 15                  # Res2s second-order ≈ 30 standard Euler steps
 DEFAULT_VIDEO_CFG  = 3.0
 DEFAULT_AUDIO_CFG  = 7.0
