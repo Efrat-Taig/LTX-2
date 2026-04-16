@@ -57,6 +57,28 @@ BM_VIDEO_CFG   = 3.0
 BM_AUDIO_CFG   = 7.0
 BM_LORA_S1     = 0.25
 BM_LORA_S2     = 0.50
+BM_ENHANCE_PROMPT = True   # use Gemma prompt enhancer built into the pipeline
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  SHARED DIALOGUE — appended to every scene prompt
+# ══════════════════════════════════════════════════════════════════════════════
+
+_DIALOGUE = (
+    "\n\n[DIALOGUE - WHAT SHE SAYS]\n"
+    "Pink pup (in a warm, cheerful voice, speaking directly to camera): "
+    '"Hi Gili — I heard it\'s your birthday, so I came to wish you a happy birthday!" '
+    "Expressive face, mouth moving clearly with the words.\n\n"
+    "[DIALOGUE - WHAT SHE SAYS]\n"
+    "Pink pup (warmly, sincerely): "
+    '"Your mom, Efrat, asked me to tell you that you\'re a wonderful girl! '
+    "You're an amazing person! A wonderful human — you're perfect just the way you are.\" "
+    "Warm smile, expressive eyes, mouth moving with the speech.\n\n"
+    "[DIALOGUE - WHAT SHE SAYS]\n"
+    "Pink pup (enthusiastic, upbeat): "
+    '"Keep being a great big sister to your little sister Aya, and most importantly — '
+    'stay happy and joyful! From all of us here at Adventure Bay." '
+    "Big smile, excited expression, mouth moving animatedly."
+)
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  BENCHMARK SCENES
@@ -73,6 +95,7 @@ BENCHMARK_SCENES = [
             "PAW Patrol lookout tower on a bright sunny day. She turns her head toward the camera "
             "with a warm, proud smile, tail wagging gently. Expressive eyes, slight head tilt, "
             "charming and confident energy. Mountains and ocean visible in the background."
+            + _DIALOGUE
         ),
     },
     {
@@ -85,6 +108,7 @@ BENCHMARK_SCENES = [
             "Christmas village surrounded by decorated trees and colorful gift boxes. She bobs her "
             "head cheerfully, smiles with festive excitement, ears perking up with joy. "
             "Northern lights glowing in the night sky behind her. Warm, cozy holiday energy."
+            + _DIALOGUE
         ),
     },
     {
@@ -98,6 +122,7 @@ BENCHMARK_SCENES = [
             "She looks around the scene with wide, playful eyes, then gives a mischievous grin "
             "at the camera, wiggling her ears. Moonlit Halloween night, warm orange pumpkin glow. "
             "Fun, spooky-cute energy."
+            + _DIALOGUE
         ),
     },
     {
@@ -110,6 +135,7 @@ BENCHMARK_SCENES = [
             "Halloween party. She looks directly at the camera with wide, sparkling eyes and a big "
             "excited smile, tail wagging with energy. She does a happy little bounce in place. "
             "Warm orange candlelit glow from the pumpkins, lively party energy."
+            + _DIALOGUE
         ),
     },
     {
@@ -122,6 +148,7 @@ BENCHMARK_SCENES = [
             "decorated with Christmas lights and green garland. Snowflakes drifting gently around "
             "her. She looks up at the falling snow with wide, wonder-filled eyes, then turns to "
             "smile warmly at the camera. Peaceful winter night, crescent moon glowing softly above."
+            + _DIALOGUE
         ),
     },
 ]
@@ -213,6 +240,7 @@ def generate_one(pipeline, *, scene, num_frames, video_guider_params,
         audio_guider_params=audio_guider_params,
         images=[ImageConditioningInput(path=str(scene["image"]), frame_idx=0, strength=1.0)],
         tiling_config=tiling_config,
+        enhance_prompt=BM_ENHANCE_PROMPT,
     )
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
