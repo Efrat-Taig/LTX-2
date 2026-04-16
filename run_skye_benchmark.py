@@ -57,7 +57,7 @@ BM_VIDEO_CFG   = 3.0
 BM_AUDIO_CFG   = 7.0
 BM_LORA_S1     = 0.25
 BM_LORA_S2     = 0.50
-BM_ENHANCE_PROMPT = True   # use Gemma prompt enhancer built into the pipeline
+BM_ENHANCE_PROMPT = False  # matches run_skye_like_api.py which gives best results without it
 
 # Where the 5 overfit test frames live (extracted from training clips)
 OVERFIT_IMAGES_DIR = SCRIPT_DIR / "inputs" / "overfit_bm"
@@ -305,7 +305,11 @@ def generate_one(pipeline, *, scene, num_frames, video_guider_params,
     tiling_config = TilingConfig.default()
     video_chunks_number = get_video_chunks_number(num_frames, tiling_config)
 
-    negative_prompt = DEFAULT_NEGATIVE_PROMPT
+    negative_prompt = (
+        DEFAULT_NEGATIVE_PROMPT
+        + ", waving paw, raised paw, paw in the air, arm raised, hand gesture, "
+        "waving hand, pointing, gesturing, paw movement, arm movement"
+    )
 
     enhance = scene.get("enhance_prompt", BM_ENHANCE_PROMPT)
 
