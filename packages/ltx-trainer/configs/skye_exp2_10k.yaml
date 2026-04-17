@@ -1,0 +1,98 @@
+# =============================================================================
+# Skye LoRA — EXP-2 Extended: Standard (rank 32 / 10000 steps)
+# =============================================================================
+#
+# Purpose: Extended version of EXP-2. With 409 clips, 5000 steps was only
+# ~12 epochs — underfitting. 10000 steps ≈ 24 epochs, closer to tutorial
+# best-practice ratio (tutorial: 19 clips / 5000 steps = 263 epochs).
+#
+# Fresh run (not continued from EXP-2 checkpoint) so the linear LR schedule
+# runs its full curve from 1e-4 → 0 over 10000 steps.
+#
+# Checkpoint/validation every 500 steps → 20 checkpoints total.
+# =============================================================================
+
+model:
+  model_path: "/home/efrattaig/models/LTX-2.3/ltx-2.3-22b-dev.safetensors"
+  text_encoder_path: "/home/efrattaig/models/gemma-3-12b-it-qat-q4_0-unquantized"
+  training_mode: "lora"
+  load_checkpoint: null
+
+lora:
+  rank: 32
+  alpha: 32
+  dropout: 0.0
+  target_modules:
+    - "to_k"
+    - "to_q"
+    - "to_v"
+    - "to_out.0"
+
+training_strategy:
+  name: "text_to_video"
+  first_frame_conditioning_p: 0.5
+  with_audio: true
+  audio_latents_dir: "audio_latents"
+
+optimization:
+  learning_rate: 1e-4
+  steps: 10000
+  batch_size: 1
+  gradient_accumulation_steps: 1
+  max_grad_norm: 1.0
+  optimizer_type: "adamw"
+  scheduler_type: "linear"
+  scheduler_params: {}
+  enable_gradient_checkpointing: true
+
+acceleration:
+  mixed_precision_mode: "bf16"
+  quantization: null
+  load_text_encoder_in_8bit: true
+
+data:
+  preprocessed_data_root: "/home/efrattaig/data/golden_skye_preprocessed"
+  num_dataloader_workers: 2
+
+validation:
+  prompts:
+    - "SKYE, the Cockapoo pup from PAW Patrol, sits in her pink helicopter cockpit with her aviator helmet on. She says 'PAW Patrol, on a roll!' Her big purple eyes light up with excitement as she pulls back on the controls. The audio captures her enthusiastic voice and the hum of the helicopter blades."
+    - "SKYE from PAW Patrol does an aerial barrel roll with her helicopter backpack, pink fur gleaming in the sunlight, ears streaming behind her as she spins. She calls out 'This pup's gotta fly!' The audio has her joyful laugh and the whirring of her rotors."
+    - "SKYE sits at the Lookout tower beside Chase, her tail wagging eagerly. She tilts her head and says 'Don't worry, I've got this!' Her purple eyes are wide and bright, full of confidence. The audio captures her clear, cheerful voice and ambient outdoor sounds."
+  negative_prompt: "worst quality, inconsistent motion, blurry, jittery, distorted"
+  images: null
+  video_dims: [960, 544, 49]
+  frame_rate: 25.0
+  seed: 42
+  inference_steps: 30
+  interval: 500
+  videos_per_prompt: 1
+  guidance_scale: 4.0
+  stg_scale: 1.0
+  stg_blocks: [29]
+  stg_mode: "stg_av"
+  generate_audio: true
+  skip_initial_validation: false
+
+checkpoints:
+  interval: 500
+  keep_last_n: 0  # keep all 20 checkpoints for benchmarking
+  precision: "bfloat16"
+
+flow_matching:
+  timestep_sampling_mode: "shifted_logit_normal"
+  timestep_sampling_params: {}
+
+hub:
+  push_to_hub: false
+  hub_model_id: null
+
+wandb:
+  enabled: true
+  project: "ltx-2-skye-lora"
+  entity: null
+  tags: ["ltx2", "lora", "skye", "exp2-10k"]
+  log_validation_videos: true
+
+seed: 42
+output_dir: "outputs/skye_exp2_10k"
