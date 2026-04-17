@@ -308,7 +308,7 @@ def build_pipeline_lora(lora_path: Path):
     """Base model + Skye LoRA checkpoint."""
     import torch
     torch.backends.cudnn.enabled = False
-    from ltx_core.loader import LoraPathStrengthAndSDOps
+    from ltx_core.loader import LTXV_LORA_COMFY_RENAMING_MAP, LoraPathStrengthAndSDOps
     from ltx_pipelines.ti2vid_two_stages_hq import TI2VidTwoStagesHQPipeline
     return TI2VidTwoStagesHQPipeline(
         checkpoint_path=str(CHECKPOINT),
