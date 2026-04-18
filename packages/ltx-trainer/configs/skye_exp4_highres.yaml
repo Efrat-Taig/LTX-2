@@ -1,0 +1,115 @@
+# =============================================================================
+# Skye LoRA — EXP4_highres: Portrait 768×1024 + I2V + FFN (15000 steps)
+# =============================================================================
+#
+# Primary goal: fix small-detail fidelity — collar tag, facial features.
+#
+# Three improvements over EXP4:
+#   1. Portrait 768×1024 training — source clips are portrait/square close-ups.
+#      Eliminates the landscape crop that squishes Skye and discards head/neck.
+#      Skye's face fills more of the frame → tag gets more VAE latent tokens.
+#   2. FFN layers added — captures fine character texture and style beyond
+#      attention patterns alone. Same target_modules as EXP3_highcap.
+#   3. 15000 steps — matches EXP3 for fair comparison.
+#
+# I2V: first_frame_conditioning_p = 0.8.
+#   For production: provide a clean start frame — the tag is directly encoded
+#   in the conditioning latent and the model copies it rather than inventing it.
+#
+# Run with 2-GPU DDP:
+#   uv run accelerate launch \
+#     --config_file packages/ltx-trainer/configs/accelerate/ddp_2gpu.yaml \
+#     packages/ltx-trainer/scripts/train.py \
+#     packages/ltx-trainer/configs/skye_exp4_highres.yaml
+# =============================================================================
+
+model:
+  model_path: "/home/efrat_t_smiti_ai/models/LTX-2.3/ltx-2.3-22b-dev.safetensors"
+  text_encoder_path: "/home/efrat_t_smiti_ai/models/gemma-3-12b-it-qat-q4_0-unquantized"
+  training_mode: "lora"
+  load_checkpoint: null
+
+lora:
+  rank: 32
+  alpha: 32
+  dropout: 0.0
+  target_modules:
+    # Attention layers
+    - "to_k"
+    - "to_q"
+    - "to_v"
+    - "to_out.0"
+    # Feed-forward layers — fine-detail / texture capacity
+    - "ff.net.0.proj"
+    - "ff.net.2"
+    - "audio_ff.net.0.proj"
+    - "audio_ff.net.2"
+
+training_strategy:
+  name: "text_to_video"
+  first_frame_conditioning_p: 0.8   # HIGH I2V: 80% of steps use clean first frame
+  with_audio: true
+  audio_latents_dir: "audio_latents"
+
+optimization:
+  learning_rate: 1e-4
+  steps: 15000
+  batch_size: 1
+  gradient_accumulation_steps: 1
+  max_grad_norm: 1.0
+  optimizer_type: "adamw"
+  scheduler_type: "linear"
+  scheduler_params: {}
+  enable_gradient_checkpointing: true
+
+acceleration:
+  mixed_precision_mode: "bf16"
+  quantization: null
+  load_text_encoder_in_8bit: true
+
+data:
+  preprocessed_data_root: "/home/efrat_t_smiti_ai/data/golden_skye_preprocessed_768x1024"
+  num_dataloader_workers: 2
+
+validation:
+  prompts:
+    - "SKYE, the Cockapoo pup from PAW Patrol, sits in her pink helicopter cockpit with her aviator helmet on. She says 'PAW Patrol, on a roll!' Her big purple eyes light up with excitement as she pulls back on the controls. The audio captures her enthusiastic voice and the hum of the helicopter blades."
+    - "SKYE from PAW Patrol does an aerial barrel roll with her helicopter backpack, pink fur gleaming in the sunlight, ears streaming behind her as she spins. She calls out 'This pup's gotta fly!' The audio has her joyful laugh and the whirring of her rotors."
+    - "SKYE sits at the Lookout tower beside Chase, her tail wagging eagerly. She tilts her head and says 'Don't worry, I've got this!' Her purple eyes are wide and bright, full of confidence. The audio captures her clear, cheerful voice and ambient outdoor sounds."
+  images: null
+  negative_prompt: "worst quality, inconsistent motion, blurry, jittery, distorted"
+  video_dims: [768, 1024, 97]   # Portrait — 4s validation clips during training
+  frame_rate: 25.0
+  seed: 42
+  inference_steps: 30
+  interval: 500
+  videos_per_prompt: 1
+  guidance_scale: 4.0
+  stg_scale: 1.0
+  stg_blocks: [29]
+  stg_mode: "stg_av"
+  generate_audio: true
+  skip_initial_validation: false
+
+checkpoints:
+  interval: 500
+  keep_last_n: 0  # Keep all — needed to benchmark full training curve
+  precision: "bfloat16"
+
+flow_matching:
+  timestep_sampling_mode: "shifted_logit_normal"
+  timestep_sampling_params: {}
+
+hub:
+  push_to_hub: false
+  hub_model_id: null
+
+wandb:
+  enabled: true
+  project: "ltx-2-skye-lora"
+  entity: null
+  tags: ["ltx2", "lora", "skye", "exp4-highres", "portrait", "768x1024"]
+  log_validation_videos: true
+
+seed: 42
+output_dir: "outputs/skye_exp4_highres"

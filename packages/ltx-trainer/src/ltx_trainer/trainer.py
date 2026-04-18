@@ -194,11 +194,16 @@ class LtxvTrainer:
                             sampled_videos_paths = self._sample_videos(progress)
                             if IS_MAIN_PROCESS and sampled_videos_paths and self._config.wandb.log_validation_videos:
                                 self._log_validation_samples(sampled_videos_paths, cfg.validation.prompts)
-                        # DDP: Only main process runs validation
-                        elif IS_MAIN_PROCESS:
-                            sampled_videos_paths = self._sample_videos(progress)
-                            if sampled_videos_paths and self._config.wandb.log_validation_videos:
-                                self._log_validation_samples(sampled_videos_paths, cfg.validation.prompts)
+                        else:
+                            # DDP or single GPU: barrier ensures all processes sync before/after validation.
+                            # In DDP, rank 0 runs validation with the unwrapped model (no DDP all-reduce
+                            # during inference); rank 1 waits at the barrier. Both rejoin after.
+                            self._accelerator.wait_for_everyone()
+                            if IS_MAIN_PROCESS:
+                                sampled_videos_paths = self._sample_videos(progress)
+                                if sampled_videos_paths and self._config.wandb.log_validation_videos:
+                                    self._log_validation_samples(sampled_videos_paths, cfg.validation.prompts)
+                            self._accelerator.wait_for_everyone()
 
                     # Save checkpoint if needed
                     if (
@@ -761,9 +766,10 @@ class LtxvTrainer:
             num_steps=inference_steps,
         )
 
-        # Create validation sampler with loaded models and progress tracking
+        # Create validation sampler with loaded models and progress tracking.
+        # Unwrap DDP/FSDP wrapper so inference runs on the raw model without distributed hooks.
         sampler = ValidationSampler(
-            transformer=self._transformer,
+            transformer=self._accelerator.unwrap_model(self._transformer),
             vae_decoder=self._vae_decoder,
             vae_encoder=self._vae_encoder,
             text_encoder=None,
