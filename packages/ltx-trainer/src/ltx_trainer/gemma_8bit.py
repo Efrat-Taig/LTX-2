@@ -22,7 +22,11 @@ from ltx_core.text_encoders.gemma.encoders.base_encoder import GemmaTextEncoder
 from ltx_core.text_encoders.gemma.tokenizer import LTXVGemmaTokenizer
 
 
-def load_8bit_gemma(gemma_model_path: str | Path, dtype: torch.dtype = torch.bfloat16) -> GemmaTextEncoder:
+def load_8bit_gemma(
+    gemma_model_path: str | Path,
+    dtype: torch.dtype = torch.bfloat16,
+    device: str | torch.device = "cuda",
+) -> GemmaTextEncoder:
     """Load the Gemma text encoder in 8-bit precision using bitsandbytes.
     Only the Gemma LLM backbone is loaded here.  The embeddings processor
     (feature extractor + connectors) should be loaded separately via
@@ -47,12 +51,17 @@ def load_8bit_gemma(gemma_model_path: str | Path, dtype: torch.dtype = torch.bfl
     tokenizer_path = _find_gemma_subpath(gemma_model_path, "tokenizer.model")
 
     quantization_config = BitsAndBytesConfig(load_in_8bit=True)
+    # Pin the entire model to a single device (the calling process's GPU).
+    # device_map="auto" would split layers across all visible GPUs, which breaks
+    # DDP training because hidden states from different layers end up on different
+    # devices and can't be stacked in the feature extractor.
+    device_str = str(torch.device(device))
     with _suppress_accelerate_memory_warnings():
         gemma_model = Gemma3ForConditionalGeneration.from_pretrained(
             gemma_path,
             quantization_config=quantization_config,
             torch_dtype=torch.bfloat16,
-            device_map="auto",
+            device_map={"": device_str},
             local_files_only=True,
         )
 

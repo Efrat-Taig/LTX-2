@@ -211,7 +211,7 @@ def load_text_encoder(
     if load_in_8bit:
         from ltx_trainer.gemma_8bit import load_8bit_gemma
 
-        return load_8bit_gemma(gemma_model_path, dtype)
+        return load_8bit_gemma(gemma_model_path, dtype, device=device)
 
     # Standard loading path
     from ltx_core.loader.single_gpu_model_builder import SingleGPUModelBuilder
