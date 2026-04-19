@@ -35,16 +35,6 @@ RESOLUTIONS = [
 ]
 
 
-def _esc(text: str) -> str:
-    """Escape text for ffmpeg drawtext. Keeps first 100 chars."""
-    text = text[:100]
-    text = text.replace("\\", "\\\\")
-    text = text.replace("'",  "\\'")
-    text = text.replace(":",  "\\:")
-    text = text.replace("%",  "%%")
-    return text
-
-
 def make_preview(clips: list[tuple[str, str]], width: int, height: int, output_path: Path) -> None:
     with tempfile.TemporaryDirectory() as _tmp:
         tmpdir = Path(_tmp)
@@ -52,7 +42,10 @@ def make_preview(clips: list[tuple[str, str]], width: int, height: int, output_p
 
         for i, (media_path, caption) in enumerate(clips):
             out_clip = tmpdir / f"clip_{i:04d}.mp4"
-            label = _esc(caption)
+
+            # Write caption to a temp file — avoids ALL shell/filter-string escaping issues
+            caption_file = tmpdir / f"cap_{i:04d}.txt"
+            caption_file.write_text(caption[:120])
 
             # Same logic as process_videos.py _resize_and_crop:
             #   scale so both dims are >= target (force_original_aspect_ratio=increase)
@@ -60,7 +53,7 @@ def make_preview(clips: list[tuple[str, str]], width: int, height: int, output_p
             vf = (
                 f"scale={width}:{height}:force_original_aspect_ratio=increase,"
                 f"crop={width}:{height},"
-                f"drawtext=text='{label}':"
+                f"drawtext=textfile={caption_file}:"
                 f"fontsize=18:fontcolor=white:x=10:y=h-70:"
                 f"box=1:boxcolor=black@0.65:boxborderw=5:expansion=none"
             )
