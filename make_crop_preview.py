@@ -62,7 +62,7 @@ def make_preview(clips: list[tuple[str, str]], width: int, height: int, output_p
                 "ffmpeg", "-y",
                 "-i", str(media_path),
                 "-vf", vf,
-                "-c:v", "libx264", "-crf", "23", "-preset", "fast",
+                "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "23", "-preset", "fast",
                 "-an",
                 "-t", "6",   # cap each clip at 6s so preview doesn't get too long
                 str(out_clip),
@@ -89,7 +89,7 @@ def make_preview(clips: list[tuple[str, str]], width: int, height: int, output_p
             "ffmpeg", "-y",
             "-f", "concat", "-safe", "0",
             "-i", str(concat_txt),
-            "-c:v", "libx264", "-crf", "22", "-preset", "fast",
+            "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "22", "-preset", "fast",
             str(output_path),
         ]
         subprocess.run(cmd, check=True, capture_output=True)
