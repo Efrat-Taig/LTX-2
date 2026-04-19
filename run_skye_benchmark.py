@@ -502,6 +502,10 @@ def main() -> int:
         help="Only benchmark these checkpoint step numbers. Default: all found.",
     )
     parser.add_argument(
+        "--last-only", action="store_true",
+        help="Only run the highest-step checkpoint per experiment. Useful for quick cross-experiment comparison.",
+    )
+    parser.add_argument(
         "--dry-run", action="store_true",
         help="Print plan without generating anything.",
     )
@@ -560,6 +564,14 @@ def main() -> int:
         if not checkpoints:
             print(f"No checkpoints found at steps {sorted(allowed)}.", file=sys.stderr)
             return 1
+
+    if args.last_only:
+        last_per_exp: dict[str, tuple] = {}
+        for exp_name, step, ckpt_path in checkpoints:
+            if exp_name not in last_per_exp or step > last_per_exp[exp_name][1]:
+                last_per_exp[exp_name] = (exp_name, step, ckpt_path)
+        checkpoints = sorted(last_per_exp.values(), key=lambda t: t[0])
+        print(f"  --last-only: keeping {[f'{e}@{s}' for e,s,_ in checkpoints]}")
 
     # ── Build work lists ──────────────────────────────────────────────────────
     # base_needed:   scenes where base video doesn't exist yet
