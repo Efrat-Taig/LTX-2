@@ -71,10 +71,13 @@ data:
 
 validation:
   prompts:
-    - "PAW Patrol pups gathered at the Lookout tower in Adventure Bay. Ryder stands with Chase, Skye, Marshall, Rocky, Rubble, and Zuma, all in their PAW Patrol uniforms. Ryder says 'PAW Patrol, let's go!' The audio captures his confident voice and the pups' excited barks."
-    - "Chase the German Shepherd pup and Skye the Cockapoo run side by side across a sunny field in Adventure Bay. Chase says 'We're on the case!' while Skye calls 'I'm on it!' Both are wearing their PAW Patrol uniforms. The audio has their enthusiastic voices and paws on the ground."
-    - "Ryder rides his ATV through Adventure Bay, followed by Marshall's fire truck and Chase's police cruiser. The convoy races toward the bay as Ryder says 'No job is too big, no pup is too small!' The audio captures the engines revving and Ryder's rallying call."
-  images: null
+    - "SKYE and CHASE from PAW Patrol stand together at a crosswalk in Adventure Bay, the Lookout tower visible in the background. Skye turns to Chase and says 'Ready to cross?' Chase nods and replies 'Always look both ways first!' Both pups step confidently onto the crosswalk together. The audio captures their cheerful voices and paws on the pavement."
+    - "CHASE the German Shepherd pup stands at the crosswalk in Adventure Bay, looking left and right carefully. He says 'All clear — let's go, Skye!' His badge gleams as he steps forward. SKYE skips alongside him, her pink outfit bright in the sunshine. The audio has Chase's confident voice and the ambient sounds of the town."
+    - "SKYE and CHASE walk side by side across the sunny crosswalk in Adventure Bay, the colorful town buildings and Lookout tower behind them. Skye laughs and does a little spin, saying 'This is the best day!' Chase wags his tail and barks happily. The audio captures Skye's joyful laugh and Chase's bark echoing down the street."
+  images:
+    - "/home/efrattaig/LTX-2/inputs/BM_v1/benchmark_v1/skye_chase_crosswalk_safety/start_frame.png"
+    - "/home/efrattaig/LTX-2/inputs/BM_v1/benchmark_v1/skye_chase_crosswalk_safety/start_frame.png"
+    - "/home/efrattaig/LTX-2/inputs/BM_v1/benchmark_v1/skye_chase_crosswalk_safety/start_frame.png"
   negative_prompt: "worst quality, inconsistent motion, blurry, jittery, distorted"
   video_dims: [960, 544, 49]   # 2s validation clips at 24fps
   frame_rate: 24.0
