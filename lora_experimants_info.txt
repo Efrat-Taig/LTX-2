@@ -1,0 +1,478 @@
+================================================================================
+SKYE LORA TRAINING — COMPLETE PROJECT HANDOFF
+Written: 2026-04-20
+Repository: https://github.com/Smiti-AI/LTX-2
+Server: efrattaig@35.238.2.51
+Local working dir: /Users/efrattaig/projects/sm/LTX-2/
+================================================================================
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+1. GOAL
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Fine-tune LTX-2.3 (22B audio-video diffusion transformer) with LoRA on
+PAW Patrol footage of Skye (pink Cockapoo pup) to produce character-faithful
+videos: correct Skye appearance, her distinctive voice, and natural motion.
+
+The immediate use-case is generating Skye birthday greeting videos for kids
+using run_skye_like_api.py (local HQ pipeline) or fal-ai/ltx-2.3/image-to-video/fast.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+2. MODEL & INFERENCE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Model: LTX-2.3 (22B, Lightricks)
+Pipeline: TI2VidTwoStagesHQPipeline
+  Stage 1 — Full 22B model at half-resolution (384×512), 15 Res2s steps, CFG
+  Stage 2 — 2x spatial upsampler -> full resolution (768x1024), 4-step distilled
+
+Server model paths:
+  Checkpoint:        /home/efrattaig/models/LTX-2.3/ltx-2.3-22b-dev.safetensors
+  Distilled LoRA:    /home/efrattaig/models/LTX-2.3/ltx-2.3-22b-distilled-lora-384.safetensors
+  Spatial upsampler: /home/efrattaig/models/LTX-2.3/ltx-2.3-spatial-upscaler-x2-1.0.safetensors
+  Gemma text encoder:/home/efrattaig/models/gemma-3-12b-it-qat-q4_0-unquantized/
+
+Local inference script: run_skye_like_api.py
+  - Uses TI2VidTwoStagesHQPipeline
+  - Default: 768x1024, 15s, seed=300, 15 steps
+  - Flags: --durations, --seed, --no-audio, --video-cfg, --image, --lora, --lora-strength
+  - To use a LoRA: uv run python run_skye_like_api.py --lora path/to/lora.safetensors
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+3. CRITICAL BUG FIX — LoRA WAS SILENTLY NOT APPLIED (FIXED)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+BUG: LoRA appeared to load but had zero effect — base and LoRA videos were
+     pixel-identical. The fix is already applied in both scripts.
+
+ROOT CAUSE:
+  PEFT training saves LoRA weights with keys prefixed by "diffusion_model.",
+  e.g.: diffusion_model.transformer_blocks.0.attn1.to_k.lora_A.weight
+
+  The ltx_core loader's _prepare_deltas() function strips ".weight" from model
+  keys to construct LoRA key lookups:
+    model key: transformer_blocks.0.attn1.to_k.weight
+    looks for: transformer_blocks.0.attn1.to_k.lora_A.weight
+
+  But the LoRA file has: diffusion_model.transformer_blocks.0.attn1.to_k.lora_A.weight
+  The "diffusion_model." prefix means EVERY lookup silently fails.
+  LoRA loads without error but applies nothing.
+
+FIX: Pass sd_ops=LTXV_LORA_COMFY_RENAMING_MAP when constructing LoraPathStrengthAndSDOps
+  for the Skye LoRA. This SDOps strips the "diffusion_model." prefix, matching
+  how the distilled LoRA is already loaded correctly.
+
+  This fix is applied in:
+    - run_skye_like_api.py (build_pipeline function)
+    - run_skye_benchmark.py (build_pipeline_lora function, line ~311-320)
+
+  Before fix (broken):
+    _skye_loras = (LoraPathStrengthAndSDOps(path=..., strength=..., sd_ops=None),)
+
+  After fix (correct):
+    _skye_loras = (LoraPathStrengthAndSDOps(
+        path=..., strength=..., sd_ops=LTXV_LORA_COMFY_RENAMING_MAP),)
+
+WARNING: Any benchmark results in lora_results/ (old directory, not lora_results_FIX/)
+  were generated with the broken sd_ops=None. They are INVALID.
+  All valid results are in lora_results_FIX/.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+4. TRAINING DATA
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Source: GCS parquet
+  gs://video_gen_dataset/TinyStories/data_sets/golden_skye/videos/skye_golden_dataset_v2.parquet
+
+Total clips: 409 (pre-filtered Skye-only scenes, all 10 PAW Patrol seasons)
+  - Duration range: 2.1s - 60.1s, average 17.6s
+  - Has scene_caption column (detailed visual descriptions, high quality)
+  - Has transcript_text column (Skye's exact dialogue)
+
+Preprocessing (already done, two resolutions):
+  1. Standard (960x544) -- used for EXP-1 through EXP-4:
+     Server path: /home/efrattaig/data/golden_skye_preprocessed/
+     Resolution buckets: 960x544x49 (2s) and 960x544x97 (4s)
+     Result: 106 clips (5 were too short to preprocess)
+     Contains: latents/, conditions/, audio_latents/
+
+  2. High-res portrait (768x1024) -- used for EXP-5:
+     Server path: /home/efrattaig/data/golden_skye_preprocessed_768x1024_clean/
+     Resolution bucket: 768x1024x97 (4s at 25fps)
+     Clean data: 104 clips (removed 3 stuck/frozen + 1 dinosaur clip)
+     Contains: latents/, conditions/, audio_latents/
+
+Captions used in training:
+  All captions start with "SKYE says [transcript]." followed by scene_caption.
+  This ensures both visual appearance and voice are conditioned on Skye's identity.
+
+W&B project: ltx-2-skye-lora
+  URL: https://wandb.ai/shayzweig-smiti-ai/ltx-2-skye-lora
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+5. EXPERIMENTS -- STATUS TABLE (as of 2026-04-20)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+EXP-1: BASELINE (rank 16, 1000 steps, 960x544)
+  Config: packages/ltx-trainer/configs/skye_exp1_baseline.yaml
+  Server: outputs/skye_exp1_baseline/
+  Status: DONE -- trained, benchmarked
+  Checkpoints kept: only steps 750 and 1000 (keep_last_n=3 rotated out earlier)
+  Note: rank 16 vs 32 in other exps -- lower capacity, useful as baseline
+  Benchmark results: lora_results_FIX/benchmarks/skye_exp1_baseline/step_00750/ and step_01000/
+  Loss at completion: ~0.90
+
+EXP-2: STANDARD (rank 32, 5000 steps, 960x544)
+  Config: packages/ltx-trainer/configs/skye_exp2_standard.yaml
+  Server: outputs/skye_exp2_standard/
+  Status: DONE -- trained, benchmarked
+  Checkpoints: steps 250-5000 (every 250, keep_last_n=0 so all 20 saved)
+  Benchmarked steps: 500, 750, 1000, 2000, 3000, 4000, 5000
+  Benchmark results: lora_results_FIX/benchmarks/skye_exp2_standard/
+  Loss at completion: ~0.80 (modest decrease from ~0.95 start)
+  W&B run: tk67gaxq
+  Note: 5000 steps with 409 clips = ~12 epochs, likely underfitting
+
+EXP-2-10k: EXTENDED STANDARD (rank 32, 10000 steps, 960x544)
+  Config: packages/ltx-trainer/configs/skye_exp2_10k.yaml
+  Server: outputs/skye_exp2_10k/
+  Status: DONE -- trained, benchmarked
+  Checkpoints: steps 500-10000 (every 500, 20 total)
+  Benchmarked steps: 1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000, 9000, 10000
+  Benchmark results: lora_results_FIX/benchmarks/skye_exp2_10k/
+  W&B run: upgy4o0i
+  Note: 10000 steps = ~24 epochs with 409 clips
+
+EXP-3: HIGH CAPACITY (rank 32, attention + FFN layers)
+  Config: packages/ltx-trainer/configs/skye_exp3_highcap.yaml
+  Status: RUNNING ON A DIFFERENT MACHINE (not 35.238.2.51) -- agent handles it
+  Benchmark results: NOT YET -- will be provided by the other machine's agent
+  Note: Adds ff.net.0.proj, ff.net.2, audio_ff.net.0.proj, audio_ff.net.2
+  to target_modules. This captures more of Skye's motion style and audio.
+
+EXP-4: I2V FOCUS (rank 32, 2500 steps, first_frame_conditioning_p=0.8)
+  Config: packages/ltx-trainer/configs/skye_exp4_i2v.yaml
+  Server: outputs/skye_exp4_i2v/
+  Status: DONE -- trained, benchmarked
+  Checkpoints: steps 250-2500 (every 250, 10 total)
+  Benchmarked steps: 500, 1000, 1500, 2000, 2500
+  Benchmark results: lora_results_FIX/benchmarks/skye_exp4_i2v/
+  Loss at completion: ~0.85
+  Note: High i2v conditioning = better when providing a reference start frame.
+        Only 2500 steps = ~6 epochs, likely underfitting.
+
+EXP-4-10k: I2V FOCUS EXTENDED (rank 32, 10000 steps, first_frame_conditioning_p=0.8)
+  Config: packages/ltx-trainer/configs/skye_exp4_10k.yaml
+  Server: outputs/skye_exp4_10k/
+  Status: DONE -- trained, benchmarked
+  Checkpoints: steps 500-10000 (every 500, 20 total) -- ALL SAVED
+  Benchmarked steps: 1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000, 9000, 10000
+  Benchmark results: lora_results_FIX/benchmarks/skye_exp4_10k/
+  Note: Some results may not be fully synced locally -- run rsync to get all
+
+EXP-5: CLEAN HIGH-RES (rank 32, 15000 steps, 768x1024 portrait, attn+FFN, i2v=0.8)
+  Config: packages/ltx-trainer/configs/skye_exp5_clean_highres.yaml
+  Server: outputs/skye_exp5_clean_highres/
+  Status: *** CURRENTLY TRAINING *** -- at step ~6000/15000 as of 2026-04-20
+  Data: /home/efrattaig/data/golden_skye_preprocessed_768x1024_clean/ (104 clips)
+  Estimated completion: ~2026-04-21 morning (~9h remaining from time of writing)
+  Key differences from all other exps:
+    - Full portrait resolution (768x1024x97) instead of landscape (960x544)
+    - Clean dataset: 104 clips with frozen/stuck frames removed
+    - 15000 steps (longest run = ~36 epochs with 104 clips)
+    - Includes FFN layers in target_modules (like EXP-3)
+    - first_frame_conditioning_p=0.8 (like EXP-4)
+    - This is the "kitchen sink" experiment combining best settings from all exps
+  Benchmark: NOT YET -- run after training completes
+  W&B: project ltx-2-skye-lora, tags: exp5-clean-highres, portrait, 768x1024, clean-data
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+6. BENCHMARK SYSTEM
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Script: run_skye_benchmark.py
+  Generates per (checkpoint, scene):
+    scene_lora.mp4  -- LoRA output only
+    scene.mp4       -- Side-by-side comparison (Base | LoRA, + base-only, + lora-only clips concatenated)
+  Base model videos (one-time) stored in: benchmarks/_base/
+  Uses the sd_ops fix -- always passes LTXV_LORA_COMFY_RENAMING_MAP
+
+Usage on server:
+  cd /home/efrattaig/LTX-2
+  nohup /home/efrattaig/.local/bin/uv run python run_skye_benchmark.py \
+    --exp-dirs outputs/skye_exp5_clean_highres \
+    --output-dir /home/efrattaig/LTX-2/lora_results_FIX \
+    --steps 1000 2000 3000 4000 5000 6000 7000 8000 9000 10000 11000 12000 13000 14000 15000 \
+    > /tmp/ltx_current.log 2>&1 & disown $!
+
+Flags:
+  --exp-dirs: one or more experiment output directories
+  --output-dir: always use lora_results_FIX
+  --steps: filter to specific checkpoint steps (keep this to ~10 steps max)
+
+Benchmark output (server):
+  /home/efrattaig/LTX-2/lora_results_FIX/benchmarks/
+    _base/                    -- 10 base model videos (already done, reused)
+    skye_exp1_baseline/       -- EXP-1 steps 750, 1000
+    skye_exp2_standard/       -- EXP-2 steps 500-5000
+    skye_exp2_10k/            -- EXP-2-10k steps 1000-10000
+    skye_exp4_i2v/            -- EXP-4 steps 500-2500
+    skye_exp4_10k/            -- EXP-4-10k steps 1000-10000
+    skye_exp5_clean_highres/  -- EXP-5 (NOT YET)
+    skye_exp3_highcap/        -- EXP-3 (from other machine, NOT YET)
+
+10 benchmark scenes (inputs/BM_v1/benchmark_v1/):
+  bey, crsms, holoween, party, snow,
+  of_silly_goose, of_eagle, of_lifeguard, of_lift, of_everest
+  Each has: start_frame.png, config.json
+
+Benchmark inference params:
+  Pipeline: TI2VidTwoStagesHQPipeline (768x1024 output)
+  Duration: 10s (257 frames), Steps: 15, Seed: 42, Video CFG: 3.0
+
+Sync to local:
+  rsync -av efrattaig@35.238.2.51:/home/efrattaig/LTX-2/lora_results_FIX/ \
+            /Users/efrattaig/projects/sm/LTX-2/lora_results_FIX/
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+7. COMPARISON VIDEO SYSTEM
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Script: create_comparison.py (runs locally, uses ffmpeg + PIL)
+  Reads final-step LoRA videos from lora_results_FIX/benchmarks/
+  Creates per-scene grid videos with all experiments side by side
+  Output: lora_compar_1/<scene>_comparison.mp4
+
+Usage:
+  python3 create_comparison.py              # all 10 scenes
+  python3 create_comparison.py --scenes bey # specific scene
+
+To add a new experiment to the comparison, edit ALL_EXPERIMENTS list in the script:
+  ("skye_exp5_clean_highres", 15000, "EXP-5\nclean 768x1024 15k"),
+  ("skye_exp3_highcap", <final_step>, "EXP-3\n+FFN layers"),
+
+Current state of lora_compar_1/ (2026-04-20):
+  Has 10 comparison videos but only shows 3 panels: Base Model | EXP-1 | EXP-2
+  NEEDS REBUILD once EXP-4-10k and EXP-5 results are synced and script is updated.
+
+Steps to rebuild full comparison:
+  1. rsync (command above)
+  2. Edit create_comparison.py to add EXP-4-10k, EXP-5, EXP-3 to ALL_EXPERIMENTS
+  3. python3 create_comparison.py
+
+Local auto-watcher (may need restart):
+  nohup /tmp/watch_and_compare.sh > /tmp/watch_compare.log 2>&1 &
+  Checks every 5 min for new results and auto-rebuilds comparison.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+8. KEY FILES & PATHS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+LOCAL (Mac, /Users/efrattaig/projects/sm/LTX-2/):
+  run_skye_like_api.py          -- HQ local inference (768x1024, two-stage pipeline)
+  run_skye_benchmark.py         -- Benchmark runner
+  create_comparison.py          -- Cross-experiment comparison grid generator
+  LORA_exp_plan_1.md            -- Long-form experiment plan document
+  lora_experimants_info.txt     -- THIS FILE
+  lora_results_FIX/             -- All VALID benchmark results
+    benchmarks/_base/           -- 10 base model videos
+    benchmarks/skye_exp*/       -- Per-experiment per-step results
+  lora_compar_1/                -- Cross-experiment comparison grid videos (needs rebuild)
+  lora_results/                 -- OLD INVALID results (sd_ops bug) -- DO NOT USE
+  packages/ltx-trainer/configs/skye_exp*.yaml  -- All training configs
+
+SERVER (efrattaig@35.238.2.51, /home/efrattaig/LTX-2/):
+  outputs/skye_exp1_baseline/   -- DONE
+  outputs/skye_exp2_standard/   -- DONE
+  outputs/skye_exp2_10k/        -- DONE
+  outputs/skye_exp4_i2v/        -- DONE
+  outputs/skye_exp4_10k/        -- DONE
+  outputs/skye_exp5_clean_highres/ -- TRAINING IN PROGRESS (step ~6000/15000)
+  lora_results_FIX/             -- All benchmark results (server copy)
+  /home/efrattaig/models/LTX-2.3/  -- Model weights
+  /home/efrattaig/data/golden_skye_preprocessed/          -- 106 clips, 960x544
+  /home/efrattaig/data/golden_skye_preprocessed_768x1024_clean/ -- 104 clips, 768x1024
+  /tmp/ltx_current.log          -- Always-current log (tail -f this to monitor)
+  /tmp/ltx_chain.out            -- EXP-5 chain log
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+9. HOW TO RUN ON SERVER
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+SSH: ssh efrattaig@35.238.2.51
+
+ALWAYS check for zombie processes before starting any GPU job:
+  ps aux | grep python | grep -v grep
+
+Watch live log: tail -f /tmp/ltx_current.log (or ssh + tail -f)
+
+Run training:
+  cd /home/efrattaig/LTX-2
+  nohup /home/efrattaig/.local/bin/uv run python packages/ltx-trainer/scripts/train.py \
+    packages/ltx-trainer/configs/<config>.yaml \
+    > /tmp/ltx_current.log 2>&1 & disown $!
+
+Run benchmark (kill all other python processes first):
+  cd /home/efrattaig/LTX-2
+  nohup /home/efrattaig/.local/bin/uv run python run_skye_benchmark.py \
+    --exp-dirs outputs/<exp_name> \
+    --output-dir /home/efrattaig/LTX-2/lora_results_FIX \
+    --steps 1000 2000 3000 4000 5000 ... \
+    > /tmp/ltx_current.log 2>&1 & disown $!
+
+Pull latest code (always do this before running):
+  cd /home/efrattaig/LTX-2 && git pull
+
+RULE: Never edit code on the server. Edit locally -> git commit -> git push -> git pull on server.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+10. IMMEDIATELY PENDING TASKS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+[ ] WAIT: EXP-5 training finishes (~2026-04-21 morning, ~9h remaining from 2026-04-20)
+    Monitor: ssh efrattaig@35.238.2.51 "ls outputs/skye_exp5_clean_highres/checkpoints/ | tail -3"
+
+[ ] RUN: EXP-5 benchmark after training (on server, ~4-5h):
+    ssh efrattaig@35.238.2.51 "cd /home/efrattaig/LTX-2 && \
+      nohup /home/efrattaig/.local/bin/uv run python run_skye_benchmark.py \
+        --exp-dirs outputs/skye_exp5_clean_highres \
+        --output-dir /home/efrattaig/LTX-2/lora_results_FIX \
+        --steps 1000 2000 3000 4000 5000 6000 7000 8000 9000 10000 11000 12000 13000 14000 15000 \
+        > /tmp/ltx_current.log 2>&1 & disown \$! && echo launched"
+
+[ ] SYNC: After EXP-5 benchmark:
+    rsync -av efrattaig@35.238.2.51:/home/efrattaig/LTX-2/lora_results_FIX/ \
+              /Users/efrattaig/projects/sm/LTX-2/lora_results_FIX/
+
+[ ] REBUILD: Update create_comparison.py ALL_EXPERIMENTS to include EXP-4-10k and EXP-5:
+    ("skye_exp2_10k",            10000, "EXP-2-10k\nrank32 10k"),
+    ("skye_exp4_i2v",             2500, "EXP-4\ni2v 2.5k"),
+    ("skye_exp4_10k",            10000, "EXP-4-10k\ni2v 10k"),
+    ("skye_exp5_clean_highres",  15000, "EXP-5\nclean 768x1024 15k"),
+    Then run: python3 create_comparison.py
+
+[ ] WAIT FOR EXP-3: From other machine. When results land in
+    lora_results_FIX/benchmarks/skye_exp3_highcap/, add to create_comparison.py:
+    ("skye_exp3_highcap", <final_step>, "EXP-3\n+FFN layers")
+    Then rebuild comparison.
+
+[ ] DECISION: User watches lora_compar_1/ videos and picks best experiment.
+    Best LoRA used in production with run_skye_like_api.py --lora <path>.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+11. EXPERIMENT DESIGN RATIONALE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Variables being tested across experiments:
+
+A) STEPS (training duration):
+   EXP-2 (5k) vs EXP-2-10k (10k) vs EXP-5 (15k).
+   With 409 clips, 5k steps = ~12 epochs (tutorial used 263 epochs for 19 clips).
+   EXP-5 at 104 clips x 15k steps = ~144 epochs, much closer to tutorial ratio.
+
+B) first_frame_conditioning_p:
+   0.5 = standard (EXP-1, EXP-2, EXP-2-10k)
+   0.8 = i2v focus (EXP-4, EXP-4-10k, EXP-5)
+   Our production use-case ALWAYS provides a start frame image, so 0.8 is better.
+
+C) TARGET MODULES:
+   Attention only: to_k, to_q, to_v, to_out.0 (EXP-1, EXP-2, EXP-4)
+   + FFN layers: ff.net.0.proj, ff.net.2, audio_ff.net.0.proj, audio_ff.net.2 (EXP-3, EXP-5)
+   FFN layers give more capacity for motion style and audio character.
+
+D) RESOLUTION:
+   960x544 landscape: EXP-1 through EXP-4
+   768x1024 portrait: EXP-5 only
+   Portrait matches actual production output of run_skye_like_api.py.
+   Training at landscape may hurt quality since the model learns landscape crops of portrait scenes.
+
+E) DATA QUALITY:
+   Standard (106 clips): EXP-1 through EXP-4
+   Clean (104 clips, frozen frames removed): EXP-5
+
+EXP-5 combines ALL the best settings: highest steps + FFN layers + portrait resolution
++ clean data + high i2v conditioning. Likely to be the best result.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+12. KNOWN ISSUES & GOTCHAS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. sd_ops BUG (FIXED): See section 3. Both scripts have the fix. Do NOT revert.
+   All results in lora_results/ (old dir) are invalid. Use lora_results_FIX/.
+
+2. W&B connectivity: Server sometimes can't reach api.wandb.ai.
+   Fix: cd /home/efrattaig/LTX-2 && wandb sync <run-dir-in-wandb-folder>
+
+3. BigVGAN cuBLASLt crash: Fixed by torch.backends.cudnn.enabled = False in
+   run_skye_like_api.py build_pipeline(). Do not remove this line.
+
+4. EXP-1 checkpoints: Only steps 750 and 1000 survived (keep_last_n=3 was set).
+   All later exps use keep_last_n=0 to keep all checkpoints.
+
+5. pgrep false positives: When using pgrep -f to detect if a job is running,
+   bash -c processes from the launch command can match the pattern even after
+   the job finishes. Always verify with: ps aux | grep python | grep -v grep
+
+6. Linear LR scheduler: All exps use scheduler_type: "linear" (LR decays to 0
+   over all steps). Do NOT continue from checkpoint -- restart fresh runs.
+   Continuing would train at near-zero LR, which is useless.
+
+7. SSH timeouts cause task-failed notifications -- these are STALE. The job on
+   the server is still alive. Always verify with ps aux before panicking.
+
+8. Odd pixel dimensions: ffmpeg with yuv420p needs even W and H.
+   create_comparison.py uses CELL_H=428 (not 427) to avoid this.
+
+9. lora_results/ vs lora_results_FIX/: Old dir = invalid. New dir = valid.
+
+10. EXP-5 data path: golden_skye_preprocessed_768x1024_clean/ -- different from
+    standard golden_skye_preprocessed/. Different resolution, 104 not 106 clips.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+13. QUICK REFERENCE COMMANDS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+# Check what's running on server
+ssh efrattaig@35.238.2.51 "ps aux | grep python | grep -v grep"
+
+# Watch training log live
+ssh efrattaig@35.238.2.51 "tail -f /tmp/ltx_current.log"
+
+# Check EXP-5 training step
+ssh efrattaig@35.238.2.51 "ls /home/efrattaig/LTX-2/outputs/skye_exp5_clean_highres/checkpoints/ | tail -3"
+
+# Sync all results to local
+rsync -av efrattaig@35.238.2.51:/home/efrattaig/LTX-2/lora_results_FIX/ \
+          /Users/efrattaig/projects/sm/LTX-2/lora_results_FIX/
+
+# Rebuild comparison videos (run from local project root after syncing)
+# First update ALL_EXPERIMENTS in create_comparison.py to include new exps
+python3 create_comparison.py
+
+# Run inference with a specific LoRA
+uv run python run_skye_like_api.py \
+  --lora /path/to/lora_weights_step_XXXXX.safetensors \
+  --lora-strength 1.0 \
+  --durations 10 \
+  --seed 300
+
+# Run EXP-5 benchmark (after training completes ~2026-04-21)
+ssh efrattaig@35.238.2.51 "cd /home/efrattaig/LTX-2 && \
+  nohup /home/efrattaig/.local/bin/uv run python run_skye_benchmark.py \
+    --exp-dirs outputs/skye_exp5_clean_highres \
+    --output-dir /home/efrattaig/LTX-2/lora_results_FIX \
+    --steps 1000 2000 3000 4000 5000 6000 7000 8000 9000 10000 11000 12000 13000 14000 15000 \
+    > /tmp/ltx_current.log 2>&1 & disown \$! && echo launched"
