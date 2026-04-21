@@ -93,7 +93,7 @@ validation:
   skip_initial_validation: true   # Avoid OOM if benchmark is still running at start
 
 checkpoints:
-  interval: 500
+  interval: 2000
   keep_last_n: 0  # Keep all — needed to benchmark full training curve
   precision: "bfloat16"
 
