@@ -79,7 +79,7 @@ validation:
     - "/home/efrattaig/LTX-2/inputs/BM_v1/benchmark_v1/skye_chase_crosswalk_safety/start_frame.png"
     - "/home/efrattaig/LTX-2/inputs/BM_v1/benchmark_v1/skye_chase_crosswalk_safety/start_frame.png"
   negative_prompt: "worst quality, inconsistent motion, blurry, jittery, distorted"
-  video_dims: [960, 544, 49]   # 2s validation clips at 24fps
+  video_dims: [480, 288, 25]   # small validation clips to avoid OOM alongside training state
   frame_rate: 24.0
   seed: 42
   inference_steps: 30

@@ -204,6 +204,7 @@ class LtxvTrainer:
                                 if sampled_videos_paths and self._config.wandb.log_validation_videos:
                                     self._log_validation_samples(sampled_videos_paths, cfg.validation.prompts)
                             self._accelerator.wait_for_everyone()
+                            torch.cuda.empty_cache()
 
                     # Save checkpoint if needed
                     if (
