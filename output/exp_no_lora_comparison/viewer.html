@@ -1,0 +1,789 @@
+<!doctype html><html><head>
+<meta charset="utf-8">
+<title>exp_no_lora — variant comparison</title>
+<style>
+* { box-sizing: border-box; }
+body { font-family: system-ui, -apple-system, sans-serif; background: #0a0a0a; color: #eee;
+       margin: 0; padding: 24px; }
+h1 { color: #ffdc00; margin: 0 0 4px 0; }
+.lead { color: #aaa; margin: 0 0 20px 0; font-size: 14px; }
+nav { position: sticky; top: 0; background: #0a0a0a; padding: 10px 0 14px 0;
+      border-bottom: 1px solid #222; margin-bottom: 18px; z-index: 10; font-size: 13px; }
+nav a { color: #9cf; margin-right: 14px; text-decoration: none; }
+nav a:hover { color: #fff; }
+.scene { border: 1px solid #222; border-radius: 10px; margin-bottom: 26px; padding: 18px;
+         background: #141414; scroll-margin-top: 60px; }
+.scene-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+.scene-title { font-size: 18px; color: #ffdc00; font-weight: 600; }
+.ctrl button { background: #1f1f1f; color: #fff; border: 1px solid #444; padding: 6px 12px;
+               cursor: pointer; margin-left: 6px; border-radius: 5px; font-size: 13px; }
+.ctrl button:hover { background: #2a2a2a; border-color: #666; }
+.row { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
+.cell { display: flex; flex-direction: column; border: 3px solid transparent; border-radius: 6px;
+        transition: border-color 0.15s, box-shadow 0.15s; }
+.cell .label { background: #1f1f1f; color: #ddd; padding: 6px 8px; font-size: 12px;
+               text-align: center; font-weight: 600; letter-spacing: 0.02em; border-radius: 3px 3px 0 0; }
+.cell video { width: 100%; background: black; cursor: pointer; display: block;
+              border-radius: 0 0 3px 3px; }
+.cell.playing { border-color: #2ee062; box-shadow: 0 0 12px rgba(46, 224, 98, 0.5); }
+.cell.playing .label { background: #2ee062; color: #000; }
+details.prompts { margin-top: 14px; border: 1px solid #2a2a2a; border-radius: 6px; background: #101010; }
+details.prompts > summary { cursor: pointer; padding: 8px 12px; color: #9cf; font-size: 13px;
+                            list-style: none; user-select: none; }
+details.prompts > summary::-webkit-details-marker { display: none; }
+details.prompts > summary::before { content: "▸ "; color: #666; }
+details.prompts[open] > summary::before { content: "▾ "; color: #9cf; }
+.prompts-body { padding: 10px 12px 14px 12px; display: grid; grid-template-columns: 1fr 1fr;
+                gap: 10px; }
+.prompt-block { display: flex; flex-direction: column; gap: 4px; }
+.prompt-block .head { font-size: 11px; color: #888; letter-spacing: 0.04em;
+                      text-transform: uppercase; }
+.prompt-block textarea, .prompt-block .text-ro {
+  background: #0a0a0a; color: #ddd; border: 1px solid #333; border-radius: 4px;
+  padding: 8px 10px; font-family: inherit; font-size: 12px; line-height: 1.5;
+  resize: vertical; min-height: 120px; white-space: pre-wrap;
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+}
+.prompt-block.editable { grid-column: 1 / span 2; }
+.prompt-block .actions { display: flex; gap: 8px; align-items: center; margin-top: 4px; }
+.prompt-block button { background: #225; color: #fff; border: 1px solid #446; padding: 6px 12px;
+                       cursor: pointer; border-radius: 5px; font-size: 12px; }
+.prompt-block button:hover:not(:disabled) { background: #334; }
+.prompt-block button:disabled { opacity: 0.5; cursor: not-allowed; }
+.prompt-block button.danger { background: #522; border-color: #844; }
+.prompt-block button.danger:hover:not(:disabled) { background: #733; }
+.prompt-block .status { color: #2ee062; font-size: 11px; }
+.prompt-block .status.err { color: #f55; }
+.prompt-block .meta { color: #888; font-size: 11px; }
+.server-warn { background: #3a2a00; color: #ffcc66; border: 1px solid #664a00;
+               padding: 8px 12px; border-radius: 6px; margin-bottom: 14px; font-size: 13px; }
+.legend { color: #888; font-size: 12px; margin-top: 4px; }
+</style></head><body>
+<h1>exp_no_lora — variant comparison</h1>
+<p class='lead'>▶ Play sequence = each variant one-by-one with its own audio. ▦ Play all together = all variants simultaneously, muted (for visual side-by-side). ⏹ Stop = halt the scene. Click any cell to solo one. Current cell(s) outlined in green. Space = play/stop the scene in view.</p>
+<div class='server-warn' id='server-warn' style='display:none'>Prompt editor needs the local server — start it with <code>python serve_viewer.py</code> and re-open the viewer at <code>http://127.0.0.1:8765/output/exp_no_lora_comparison/viewer.html</code>.</div>
+<nav><a href='#chase_normal'>Chase — normal</a> <a href='#chase_halloween'>Chase — halloween</a> <a href='#chase_crms'>Chase — crms</a> <a href='#chase_snow'>Chase — snow</a> <a href='#chase_party'>Chase — party</a> <a href='#skye_bey'>Skye — bey</a> <a href='#skye_crsms'>Skye — crsms</a> <a href='#skye_holoween'>Skye — holoween</a> <a href='#skye_party'>Skye — party</a> <a href='#skye_snow'>Skye — snow</a> <a href='#skye_helicopter'>Skye — helicopter</a></nav>
+<div class='scene' id='chase_normal'>
+<div class='scene-head'>
+<div class='scene-title'>Chase — normal <span class='legend'>· 6 variants</span></div>
+<div class='ctrl'>
+<button class='btn-play' onclick='playScene(this)'>▶ Play sequence</button>
+<button onclick='playAllTogether(this)'>▦ Play all together (muted)</button>
+<button onclick='stopFromBtn(this)'>⏹ Stop</button>
+<button onclick='restart(this)'>⏮ Restart</button>
+</div></div>
+<div class='row'>
+<div class='cell'>
+<div class='label'>baseline</div>
+<video src='../../lora_results/chase_lora/benchmarks/_base/normal.mp4' preload='metadata' playsinline muted></video>
+</div>
+<div class='cell'>
+<div class='label'>baseline_notext</div>
+<video src='../../lora_results/exp_no_lora/baseline_notext/chase_normal.mp4' preload='metadata' playsinline muted></video>
+</div>
+<div class='cell'>
+<div class='label'>t1_prompt</div>
+<video src='../../lora_results/exp_no_lora/t1_prompt/chase_normal.mp4' preload='metadata' playsinline muted></video>
+</div>
+<div class='cell'>
+<div class='label'>t2_stg0.5</div>
+<video src='../../lora_results/exp_no_lora/t2_stg0.5/chase_normal.mp4' preload='metadata' playsinline muted></video>
+</div>
+<div class='cell'>
+<div class='label'>t2_stg1.0</div>
+<video src='../../lora_results/exp_no_lora/t2_stg1.0/chase_normal.mp4' preload='metadata' playsinline muted></video>
+</div>
+<div class='cell'>
+<div class='label'>t2_stg2.0</div>
+<video src='../../lora_results/exp_no_lora/t2_stg2.0/chase_normal.mp4' preload='metadata' playsinline muted></video>
+</div>
+</div>
+<details class='prompts' data-scene='chase_normal'>
+<summary>Prompts — baseline · t1 · override</summary>
+<div class='prompts-body'>
+<div class='prompt-block'><div class='head'>Baseline prompt</div><div class='text-ro baseline-text'>loading…</div><div class='meta baseline-src'></div></div>
+<div class='prompt-block'><div class='head'>Prompt 1 (t1_prompt)</div><div class='text-ro t1-text'>loading…</div></div>
+<div class='prompt-block editable'><div class='head'>New baseline prompt (override)</div><textarea class='override' rows='6'></textarea><div class='actions'><button onclick='saveOverride(this)'>💾 Save override</button><button class='danger override-del' onclick='deleteOverride(this)' disabled>🗑 Delete</button><span class='meta override-meta'></span><span class='override-status'></span></div></div>
+</div></details>
+</div>
+<div class='scene' id='chase_halloween'>
+<div class='scene-head'>
+<div class='scene-title'>Chase — halloween <span class='legend'>· 6 variants</span></div>
+<div class='ctrl'>
+<button class='btn-play' onclick='playScene(this)'>▶ Play sequence</button>
+<button onclick='playAllTogether(this)'>▦ Play all together (muted)</button>
+<button onclick='stopFromBtn(this)'>⏹ Stop</button>
+<button onclick='restart(this)'>⏮ Restart</button>
+</div></div>
+<div class='row'>
+<div class='cell'>
+<div class='label'>baseline</div>
+<video src='../../lora_results/chase_lora/benchmarks/_base/halloween.mp4' preload='metadata' playsinline muted></video>
+</div>
+<div class='cell'>
+<div class='label'>baseline_notext</div>
+<video src='../../lora_results/exp_no_lora/baseline_notext/chase_halloween.mp4' preload='metadata' playsinline muted></video>
+</div>
+<div class='cell'>
+<div class='label'>t1_prompt</div>
+<video src='../../lora_results/exp_no_lora/t1_prompt/chase_halloween.mp4' preload='metadata' playsinline muted></video>
+</div>
+<div class='cell'>
+<div class='label'>t2_stg0.5</div>
+<video src='../../lora_results/exp_no_lora/t2_stg0.5/chase_halloween.mp4' preload='metadata' playsinline muted></video>
+</div>
+<div class='cell'>
+<div class='label'>t2_stg1.0</div>
+<video src='../../lora_results/exp_no_lora/t2_stg1.0/chase_halloween.mp4' preload='metadata' playsinline muted></video>
+</div>
+<div class='cell'>
+<div class='label'>t2_stg2.0</div>
+<video src='../../lora_results/exp_no_lora/t2_stg2.0/chase_halloween.mp4' preload='metadata' playsinline muted></video>
+</div>
+</div>
+<details class='prompts' data-scene='chase_halloween'>
+<summary>Prompts — baseline · t1 · override</summary>
+<div class='prompts-body'>
+<div class='prompt-block'><div class='head'>Baseline prompt</div><div class='text-ro baseline-text'>loading…</div><div class='meta baseline-src'></div></div>
+<div class='prompt-block'><div class='head'>Prompt 1 (t1_prompt)</div><div class='text-ro t1-text'>loading…</div></div>
+<div class='prompt-block editable'><div class='head'>New baseline prompt (override)</div><textarea class='override' rows='6'></textarea><div class='actions'><button onclick='saveOverride(this)'>💾 Save override</button><button class='danger override-del' onclick='deleteOverride(this)' disabled>🗑 Delete</button><span class='meta override-meta'></span><span class='override-status'></span></div></div>
+</div></details>
+</div>
+<div class='scene' id='chase_crms'>
+<div class='scene-head'>
+<div class='scene-title'>Chase — crms <span class='legend'>· 6 variants</span></div>
+<div class='ctrl'>
+<button class='btn-play' onclick='playScene(this)'>▶ Play sequence</button>
+<button onclick='playAllTogether(this)'>▦ Play all together (muted)</button>
+<button onclick='stopFromBtn(this)'>⏹ Stop</button>
+<button onclick='restart(this)'>⏮ Restart</button>
+</div></div>
+<div class='row'>
+<div class='cell'>
+<div class='label'>baseline</div>
+<video src='../../lora_results/chase_lora/benchmarks/_base/crms.mp4' preload='metadata' playsinline muted></video>
+</div>
+<div class='cell'>
+<div class='label'>baseline_notext</div>
+<video src='../../lora_results/exp_no_lora/baseline_notext/chase_crms.mp4' preload='metadata' playsinline muted></video>
+</div>
+<div class='cell'>
+<div class='label'>t1_prompt</div>
+<video src='../../lora_results/exp_no_lora/t1_prompt/chase_crms.mp4' preload='metadata' playsinline muted></video>
+</div>
+<div class='cell'>
+<div class='label'>t2_stg0.5</div>
+<video src='../../lora_results/exp_no_lora/t2_stg0.5/chase_crms.mp4' preload='metadata' playsinline muted></video>
+</div>
+<div class='cell'>
+<div class='label'>t2_stg1.0</div>
+<video src='../../lora_results/exp_no_lora/t2_stg1.0/chase_crms.mp4' preload='metadata' playsinline muted></video>
+</div>
+<div class='cell'>
+<div class='label'>t2_stg2.0</div>
+<video src='../../lora_results/exp_no_lora/t2_stg2.0/chase_crms.mp4' preload='metadata' playsinline muted></video>
+</div>
+</div>
+<details class='prompts' data-scene='chase_crms'>
+<summary>Prompts — baseline · t1 · override</summary>
+<div class='prompts-body'>
+<div class='prompt-block'><div class='head'>Baseline prompt</div><div class='text-ro baseline-text'>loading…</div><div class='meta baseline-src'></div></div>
+<div class='prompt-block'><div class='head'>Prompt 1 (t1_prompt)</div><div class='text-ro t1-text'>loading…</div></div>
+<div class='prompt-block editable'><div class='head'>New baseline prompt (override)</div><textarea class='override' rows='6'></textarea><div class='actions'><button onclick='saveOverride(this)'>💾 Save override</button><button class='danger override-del' onclick='deleteOverride(this)' disabled>🗑 Delete</button><span class='meta override-meta'></span><span class='override-status'></span></div></div>
+</div></details>
+</div>
+<div class='scene' id='chase_snow'>
+<div class='scene-head'>
+<div class='scene-title'>Chase — snow <span class='legend'>· 6 variants</span></div>
+<div class='ctrl'>
+<button class='btn-play' onclick='playScene(this)'>▶ Play sequence</button>
+<button onclick='playAllTogether(this)'>▦ Play all together (muted)</button>
+<button onclick='stopFromBtn(this)'>⏹ Stop</button>
+<button onclick='restart(this)'>⏮ Restart</button>
+</div></div>
+<div class='row'>
+<div class='cell'>
+<div class='label'>baseline</div>
+<video src='../../lora_results/chase_lora/benchmarks/_base/snow.mp4' preload='metadata' playsinline muted></video>
+</div>
+<div class='cell'>
+<div class='label'>baseline_notext</div>
+<video src='../../lora_results/exp_no_lora/baseline_notext/chase_snow.mp4' preload='metadata' playsinline muted></video>
+</div>
+<div class='cell'>
+<div class='label'>t1_prompt</div>
+<video src='../../lora_results/exp_no_lora/t1_prompt/chase_snow.mp4' preload='metadata' playsinline muted></video>
+</div>
+<div class='cell'>
+<div class='label'>t2_stg0.5</div>
+<video src='../../lora_results/exp_no_lora/t2_stg0.5/chase_snow.mp4' preload='metadata' playsinline muted></video>
+</div>
+<div class='cell'>
+<div class='label'>t2_stg1.0</div>
+<video src='../../lora_results/exp_no_lora/t2_stg1.0/chase_snow.mp4' preload='metadata' playsinline muted></video>
+</div>
+<div class='cell'>
+<div class='label'>t2_stg2.0</div>
+<video src='../../lora_results/exp_no_lora/t2_stg2.0/chase_snow.mp4' preload='metadata' playsinline muted></video>
+</div>
+</div>
+<details class='prompts' data-scene='chase_snow'>
+<summary>Prompts — baseline · t1 · override</summary>
+<div class='prompts-body'>
+<div class='prompt-block'><div class='head'>Baseline prompt</div><div class='text-ro baseline-text'>loading…</div><div class='meta baseline-src'></div></div>
+<div class='prompt-block'><div class='head'>Prompt 1 (t1_prompt)</div><div class='text-ro t1-text'>loading…</div></div>
+<div class='prompt-block editable'><div class='head'>New baseline prompt (override)</div><textarea class='override' rows='6'></textarea><div class='actions'><button onclick='saveOverride(this)'>💾 Save override</button><button class='danger override-del' onclick='deleteOverride(this)' disabled>🗑 Delete</button><span class='meta override-meta'></span><span class='override-status'></span></div></div>
+</div></details>
+</div>
+<div class='scene' id='chase_party'>
+<div class='scene-head'>
+<div class='scene-title'>Chase — party <span class='legend'>· 6 variants</span></div>
+<div class='ctrl'>
+<button class='btn-play' onclick='playScene(this)'>▶ Play sequence</button>
+<button onclick='playAllTogether(this)'>▦ Play all together (muted)</button>
+<button onclick='stopFromBtn(this)'>⏹ Stop</button>
+<button onclick='restart(this)'>⏮ Restart</button>
+</div></div>
+<div class='row'>
+<div class='cell'>
+<div class='label'>baseline</div>
+<video src='../../lora_results/chase_lora/benchmarks/_base/party.mp4' preload='metadata' playsinline muted></video>
+</div>
+<div class='cell'>
+<div class='label'>baseline_notext</div>
+<video src='../../lora_results/exp_no_lora/baseline_notext/chase_party.mp4' preload='metadata' playsinline muted></video>
+</div>
+<div class='cell'>
+<div class='label'>t1_prompt</div>
+<video src='../../lora_results/exp_no_lora/t1_prompt/chase_party.mp4' preload='metadata' playsinline muted></video>
+</div>
+<div class='cell'>
+<div class='label'>t2_stg0.5</div>
+<video src='../../lora_results/exp_no_lora/t2_stg0.5/chase_party.mp4' preload='metadata' playsinline muted></video>
+</div>
+<div class='cell'>
+<div class='label'>t2_stg1.0</div>
+<video src='../../lora_results/exp_no_lora/t2_stg1.0/chase_party.mp4' preload='metadata' playsinline muted></video>
+</div>
+<div class='cell'>
+<div class='label'>t2_stg2.0</div>
+<video src='../../lora_results/exp_no_lora/t2_stg2.0/chase_party.mp4' preload='metadata' playsinline muted></video>
+</div>
+</div>
+<details class='prompts' data-scene='chase_party'>
+<summary>Prompts — baseline · t1 · override</summary>
+<div class='prompts-body'>
+<div class='prompt-block'><div class='head'>Baseline prompt</div><div class='text-ro baseline-text'>loading…</div><div class='meta baseline-src'></div></div>
+<div class='prompt-block'><div class='head'>Prompt 1 (t1_prompt)</div><div class='text-ro t1-text'>loading…</div></div>
+<div class='prompt-block editable'><div class='head'>New baseline prompt (override)</div><textarea class='override' rows='6'></textarea><div class='actions'><button onclick='saveOverride(this)'>💾 Save override</button><button class='danger override-del' onclick='deleteOverride(this)' disabled>🗑 Delete</button><span class='meta override-meta'></span><span class='override-status'></span></div></div>
+</div></details>
+</div>
+<div class='scene' id='skye_bey'>
+<div class='scene-head'>
+<div class='scene-title'>Skye — bey <span class='legend'>· 8 variants</span></div>
+<div class='ctrl'>
+<button class='btn-play' onclick='playScene(this)'>▶ Play sequence</button>
+<button onclick='playAllTogether(this)'>▦ Play all together (muted)</button>
+<button onclick='stopFromBtn(this)'>⏹ Stop</button>
+<button onclick='restart(this)'>⏮ Restart</button>
+</div></div>
+<div class='row'>
+<div class='cell'>
+<div class='label'>baseline</div>
+<video src='../../lora_results_FIX/benchmarks/_base/bey.mp4' preload='metadata' playsinline muted></video>
+</div>
+<div class='cell'>
+<div class='label'>baseline_notext</div>
+<video src='../../lora_results/exp_no_lora/baseline_notext/skye_bey.mp4' preload='metadata' playsinline muted></video>
+</div>
+<div class='cell'>
+<div class='label'>t1_prompt</div>
+<video src='../../lora_results/exp_no_lora/t1_prompt/skye_bey.mp4' preload='metadata' playsinline muted></video>
+</div>
+<div class='cell'>
+<div class='label'>t2_stg0.5</div>
+<video src='../../lora_results/exp_no_lora/t2_stg0.5/skye_bey.mp4' preload='metadata' playsinline muted></video>
+</div>
+<div class='cell'>
+<div class='label'>t2_stg1.0</div>
+<video src='../../lora_results/exp_no_lora/t2_stg1.0/skye_bey.mp4' preload='metadata' playsinline muted></video>
+</div>
+<div class='cell'>
+<div class='label'>t2_stg2.0</div>
+<video src='../../lora_results/exp_no_lora/t2_stg2.0/skye_bey.mp4' preload='metadata' playsinline muted></video>
+</div>
+<div class='cell'>
+<div class='label'>t3_acfg12</div>
+<video src='../../lora_results/exp_no_lora/t3_acfg12/skye_bey.mp4' preload='metadata' playsinline muted></video>
+</div>
+<div class='cell'>
+<div class='label'>t3_acfg18</div>
+<video src='../../lora_results/exp_no_lora/t3_acfg18/skye_bey.mp4' preload='metadata' playsinline muted></video>
+</div>
+</div>
+<details class='prompts' data-scene='skye_bey'>
+<summary>Prompts — baseline · t1 · override</summary>
+<div class='prompts-body'>
+<div class='prompt-block'><div class='head'>Baseline prompt</div><div class='text-ro baseline-text'>loading…</div><div class='meta baseline-src'></div></div>
+<div class='prompt-block'><div class='head'>Prompt 1 (t1_prompt)</div><div class='text-ro t1-text'>loading…</div></div>
+<div class='prompt-block editable'><div class='head'>New baseline prompt (override)</div><textarea class='override' rows='6'></textarea><div class='actions'><button onclick='saveOverride(this)'>💾 Save override</button><button class='danger override-del' onclick='deleteOverride(this)' disabled>🗑 Delete</button><span class='meta override-meta'></span><span class='override-status'></span></div></div>
+</div></details>
+</div>
+<div class='scene' id='skye_crsms'>
+<div class='scene-head'>
+<div class='scene-title'>Skye — crsms <span class='legend'>· 8 variants</span></div>
+<div class='ctrl'>
+<button class='btn-play' onclick='playScene(this)'>▶ Play sequence</button>
+<button onclick='playAllTogether(this)'>▦ Play all together (muted)</button>
+<button onclick='stopFromBtn(this)'>⏹ Stop</button>
+<button onclick='restart(this)'>⏮ Restart</button>
+</div></div>
+<div class='row'>
+<div class='cell'>
+<div class='label'>baseline</div>
+<video src='../../lora_results_FIX/benchmarks/_base/crsms.mp4' preload='metadata' playsinline muted></video>
+</div>
+<div class='cell'>
+<div class='label'>baseline_notext</div>
+<video src='../../lora_results/exp_no_lora/baseline_notext/skye_crsms.mp4' preload='metadata' playsinline muted></video>
+</div>
+<div class='cell'>
+<div class='label'>t1_prompt</div>
+<video src='../../lora_results/exp_no_lora/t1_prompt/skye_crsms.mp4' preload='metadata' playsinline muted></video>
+</div>
+<div class='cell'>
+<div class='label'>t2_stg0.5</div>
+<video src='../../lora_results/exp_no_lora/t2_stg0.5/skye_crsms.mp4' preload='metadata' playsinline muted></video>
+</div>
+<div class='cell'>
+<div class='label'>t2_stg1.0</div>
+<video src='../../lora_results/exp_no_lora/t2_stg1.0/skye_crsms.mp4' preload='metadata' playsinline muted></video>
+</div>
+<div class='cell'>
+<div class='label'>t2_stg2.0</div>
+<video src='../../lora_results/exp_no_lora/t2_stg2.0/skye_crsms.mp4' preload='metadata' playsinline muted></video>
+</div>
+<div class='cell'>
+<div class='label'>t3_acfg12</div>
+<video src='../../lora_results/exp_no_lora/t3_acfg12/skye_crsms.mp4' preload='metadata' playsinline muted></video>
+</div>
+<div class='cell'>
+<div class='label'>t3_acfg18</div>
+<video src='../../lora_results/exp_no_lora/t3_acfg18/skye_crsms.mp4' preload='metadata' playsinline muted></video>
+</div>
+</div>
+<details class='prompts' data-scene='skye_crsms'>
+<summary>Prompts — baseline · t1 · override</summary>
+<div class='prompts-body'>
+<div class='prompt-block'><div class='head'>Baseline prompt</div><div class='text-ro baseline-text'>loading…</div><div class='meta baseline-src'></div></div>
+<div class='prompt-block'><div class='head'>Prompt 1 (t1_prompt)</div><div class='text-ro t1-text'>loading…</div></div>
+<div class='prompt-block editable'><div class='head'>New baseline prompt (override)</div><textarea class='override' rows='6'></textarea><div class='actions'><button onclick='saveOverride(this)'>💾 Save override</button><button class='danger override-del' onclick='deleteOverride(this)' disabled>🗑 Delete</button><span class='meta override-meta'></span><span class='override-status'></span></div></div>
+</div></details>
+</div>
+<div class='scene' id='skye_holoween'>
+<div class='scene-head'>
+<div class='scene-title'>Skye — holoween <span class='legend'>· 6 variants</span></div>
+<div class='ctrl'>
+<button class='btn-play' onclick='playScene(this)'>▶ Play sequence</button>
+<button onclick='playAllTogether(this)'>▦ Play all together (muted)</button>
+<button onclick='stopFromBtn(this)'>⏹ Stop</button>
+<button onclick='restart(this)'>⏮ Restart</button>
+</div></div>
+<div class='row'>
+<div class='cell'>
+<div class='label'>baseline</div>
+<video src='../../lora_results_FIX/benchmarks/_base/holoween.mp4' preload='metadata' playsinline muted></video>
+</div>
+<div class='cell'>
+<div class='label'>baseline_notext</div>
+<video src='../../lora_results/exp_no_lora/baseline_notext/skye_holoween.mp4' preload='metadata' playsinline muted></video>
+</div>
+<div class='cell'>
+<div class='label'>t1_prompt</div>
+<video src='../../lora_results/exp_no_lora/t1_prompt/skye_holoween.mp4' preload='metadata' playsinline muted></video>
+</div>
+<div class='cell'>
+<div class='label'>t2_stg0.5</div>
+<video src='../../lora_results/exp_no_lora/t2_stg0.5/skye_holoween.mp4' preload='metadata' playsinline muted></video>
+</div>
+<div class='cell'>
+<div class='label'>t2_stg1.0</div>
+<video src='../../lora_results/exp_no_lora/t2_stg1.0/skye_holoween.mp4' preload='metadata' playsinline muted></video>
+</div>
+<div class='cell'>
+<div class='label'>t2_stg2.0</div>
+<video src='../../lora_results/exp_no_lora/t2_stg2.0/skye_holoween.mp4' preload='metadata' playsinline muted></video>
+</div>
+</div>
+<details class='prompts' data-scene='skye_holoween'>
+<summary>Prompts — baseline · t1 · override</summary>
+<div class='prompts-body'>
+<div class='prompt-block'><div class='head'>Baseline prompt</div><div class='text-ro baseline-text'>loading…</div><div class='meta baseline-src'></div></div>
+<div class='prompt-block'><div class='head'>Prompt 1 (t1_prompt)</div><div class='text-ro t1-text'>loading…</div></div>
+<div class='prompt-block editable'><div class='head'>New baseline prompt (override)</div><textarea class='override' rows='6'></textarea><div class='actions'><button onclick='saveOverride(this)'>💾 Save override</button><button class='danger override-del' onclick='deleteOverride(this)' disabled>🗑 Delete</button><span class='meta override-meta'></span><span class='override-status'></span></div></div>
+</div></details>
+</div>
+<div class='scene' id='skye_party'>
+<div class='scene-head'>
+<div class='scene-title'>Skye — party <span class='legend'>· 6 variants</span></div>
+<div class='ctrl'>
+<button class='btn-play' onclick='playScene(this)'>▶ Play sequence</button>
+<button onclick='playAllTogether(this)'>▦ Play all together (muted)</button>
+<button onclick='stopFromBtn(this)'>⏹ Stop</button>
+<button onclick='restart(this)'>⏮ Restart</button>
+</div></div>
+<div class='row'>
+<div class='cell'>
+<div class='label'>baseline</div>
+<video src='../../lora_results_FIX/benchmarks/_base/party.mp4' preload='metadata' playsinline muted></video>
+</div>
+<div class='cell'>
+<div class='label'>baseline_notext</div>
+<video src='../../lora_results/exp_no_lora/baseline_notext/skye_party.mp4' preload='metadata' playsinline muted></video>
+</div>
+<div class='cell'>
+<div class='label'>t1_prompt</div>
+<video src='../../lora_results/exp_no_lora/t1_prompt/skye_party.mp4' preload='metadata' playsinline muted></video>
+</div>
+<div class='cell'>
+<div class='label'>t2_stg0.5</div>
+<video src='../../lora_results/exp_no_lora/t2_stg0.5/skye_party.mp4' preload='metadata' playsinline muted></video>
+</div>
+<div class='cell'>
+<div class='label'>t2_stg1.0</div>
+<video src='../../lora_results/exp_no_lora/t2_stg1.0/skye_party.mp4' preload='metadata' playsinline muted></video>
+</div>
+<div class='cell'>
+<div class='label'>t2_stg2.0</div>
+<video src='../../lora_results/exp_no_lora/t2_stg2.0/skye_party.mp4' preload='metadata' playsinline muted></video>
+</div>
+</div>
+<details class='prompts' data-scene='skye_party'>
+<summary>Prompts — baseline · t1 · override</summary>
+<div class='prompts-body'>
+<div class='prompt-block'><div class='head'>Baseline prompt</div><div class='text-ro baseline-text'>loading…</div><div class='meta baseline-src'></div></div>
+<div class='prompt-block'><div class='head'>Prompt 1 (t1_prompt)</div><div class='text-ro t1-text'>loading…</div></div>
+<div class='prompt-block editable'><div class='head'>New baseline prompt (override)</div><textarea class='override' rows='6'></textarea><div class='actions'><button onclick='saveOverride(this)'>💾 Save override</button><button class='danger override-del' onclick='deleteOverride(this)' disabled>🗑 Delete</button><span class='meta override-meta'></span><span class='override-status'></span></div></div>
+</div></details>
+</div>
+<div class='scene' id='skye_snow'>
+<div class='scene-head'>
+<div class='scene-title'>Skye — snow <span class='legend'>· 8 variants</span></div>
+<div class='ctrl'>
+<button class='btn-play' onclick='playScene(this)'>▶ Play sequence</button>
+<button onclick='playAllTogether(this)'>▦ Play all together (muted)</button>
+<button onclick='stopFromBtn(this)'>⏹ Stop</button>
+<button onclick='restart(this)'>⏮ Restart</button>
+</div></div>
+<div class='row'>
+<div class='cell'>
+<div class='label'>baseline</div>
+<video src='../../lora_results_FIX/benchmarks/_base/snow.mp4' preload='metadata' playsinline muted></video>
+</div>
+<div class='cell'>
+<div class='label'>baseline_notext</div>
+<video src='../../lora_results/exp_no_lora/baseline_notext/skye_snow.mp4' preload='metadata' playsinline muted></video>
+</div>
+<div class='cell'>
+<div class='label'>t1_prompt</div>
+<video src='../../lora_results/exp_no_lora/t1_prompt/skye_snow.mp4' preload='metadata' playsinline muted></video>
+</div>
+<div class='cell'>
+<div class='label'>t2_stg0.5</div>
+<video src='../../lora_results/exp_no_lora/t2_stg0.5/skye_snow.mp4' preload='metadata' playsinline muted></video>
+</div>
+<div class='cell'>
+<div class='label'>t2_stg1.0</div>
+<video src='../../lora_results/exp_no_lora/t2_stg1.0/skye_snow.mp4' preload='metadata' playsinline muted></video>
+</div>
+<div class='cell'>
+<div class='label'>t2_stg2.0</div>
+<video src='../../lora_results/exp_no_lora/t2_stg2.0/skye_snow.mp4' preload='metadata' playsinline muted></video>
+</div>
+<div class='cell'>
+<div class='label'>t3_acfg12</div>
+<video src='../../lora_results/exp_no_lora/t3_acfg12/skye_snow.mp4' preload='metadata' playsinline muted></video>
+</div>
+<div class='cell'>
+<div class='label'>t3_acfg18</div>
+<video src='../../lora_results/exp_no_lora/t3_acfg18/skye_snow.mp4' preload='metadata' playsinline muted></video>
+</div>
+</div>
+<details class='prompts' data-scene='skye_snow'>
+<summary>Prompts — baseline · t1 · override</summary>
+<div class='prompts-body'>
+<div class='prompt-block'><div class='head'>Baseline prompt</div><div class='text-ro baseline-text'>loading…</div><div class='meta baseline-src'></div></div>
+<div class='prompt-block'><div class='head'>Prompt 1 (t1_prompt)</div><div class='text-ro t1-text'>loading…</div></div>
+<div class='prompt-block editable'><div class='head'>New baseline prompt (override)</div><textarea class='override' rows='6'></textarea><div class='actions'><button onclick='saveOverride(this)'>💾 Save override</button><button class='danger override-del' onclick='deleteOverride(this)' disabled>🗑 Delete</button><span class='meta override-meta'></span><span class='override-status'></span></div></div>
+</div></details>
+</div>
+<div class='scene' id='skye_helicopter'>
+<div class='scene-head'>
+<div class='scene-title'>Skye — helicopter <span class='legend'>· 8 variants</span></div>
+<div class='ctrl'>
+<button class='btn-play' onclick='playScene(this)'>▶ Play sequence</button>
+<button onclick='playAllTogether(this)'>▦ Play all together (muted)</button>
+<button onclick='stopFromBtn(this)'>⏹ Stop</button>
+<button onclick='restart(this)'>⏮ Restart</button>
+</div></div>
+<div class='row'>
+<div class='cell'>
+<div class='label'>baseline</div>
+<video src='../../output/output2/run_skye_like_api__skye_helicopter_birthday_gili__768x1024_15steps_8.04s_seed1660213644.mp4' preload='metadata' playsinline muted></video>
+</div>
+<div class='cell'>
+<div class='label'>baseline_notext</div>
+<video src='../../lora_results/exp_no_lora/baseline_notext/skye_helicopter.mp4' preload='metadata' playsinline muted></video>
+</div>
+<div class='cell'>
+<div class='label'>t1_prompt</div>
+<video src='../../lora_results/exp_no_lora/t1_prompt/skye_helicopter.mp4' preload='metadata' playsinline muted></video>
+</div>
+<div class='cell'>
+<div class='label'>t2_stg0.5</div>
+<video src='../../lora_results/exp_no_lora/t2_stg0.5/skye_helicopter.mp4' preload='metadata' playsinline muted></video>
+</div>
+<div class='cell'>
+<div class='label'>t2_stg1.0</div>
+<video src='../../lora_results/exp_no_lora/t2_stg1.0/skye_helicopter.mp4' preload='metadata' playsinline muted></video>
+</div>
+<div class='cell'>
+<div class='label'>t2_stg2.0</div>
+<video src='../../lora_results/exp_no_lora/t2_stg2.0/skye_helicopter.mp4' preload='metadata' playsinline muted></video>
+</div>
+<div class='cell'>
+<div class='label'>t3_acfg12</div>
+<video src='../../lora_results/exp_no_lora/t3_acfg12/skye_helicopter.mp4' preload='metadata' playsinline muted></video>
+</div>
+<div class='cell'>
+<div class='label'>t3_acfg18</div>
+<video src='../../lora_results/exp_no_lora/t3_acfg18/skye_helicopter.mp4' preload='metadata' playsinline muted></video>
+</div>
+</div>
+<details class='prompts' data-scene='skye_helicopter'>
+<summary>Prompts — baseline · t1 · override</summary>
+<div class='prompts-body'>
+<div class='prompt-block'><div class='head'>Baseline prompt</div><div class='text-ro baseline-text'>loading…</div><div class='meta baseline-src'></div></div>
+<div class='prompt-block'><div class='head'>Prompt 1 (t1_prompt)</div><div class='text-ro t1-text'>loading…</div></div>
+<div class='prompt-block editable'><div class='head'>New baseline prompt (override)</div><textarea class='override' rows='6'></textarea><div class='actions'><button onclick='saveOverride(this)'>💾 Save override</button><button class='danger override-del' onclick='deleteOverride(this)' disabled>🗑 Delete</button><span class='meta override-meta'></span><span class='override-status'></span></div></div>
+</div></details>
+</div>
+<script>
+// Per-scene sequential player state.
+const sceneState = new WeakMap();
+
+function stopScene(scene) {
+  scene.querySelectorAll('video').forEach(v => { v.pause(); v.muted = true; });
+  scene.querySelectorAll('.cell').forEach(c => c.classList.remove('playing'));
+  const st = sceneState.get(scene) || {};
+  st.active = false;
+  st.parallel = false;
+  sceneState.set(scene, st);
+  const btn = scene.querySelector('.btn-play');
+  if (btn) btn.textContent = '▶ Play sequence';
+}
+
+function playCell(scene, idx) {
+  const vids = [...scene.querySelectorAll('video')];
+  if (idx >= vids.length) {
+    stopScene(scene);
+    return;
+  }
+  // Mute and pause all, then play this one.
+  vids.forEach((v, i) => {
+    v.pause();
+    v.muted = true;
+    v.closest('.cell').classList.remove('playing');
+  });
+  const v = vids[idx];
+  v.currentTime = 0;
+  v.muted = false;
+  v.closest('.cell').classList.add('playing');
+  const state = sceneState.get(scene) || {};
+  state.current = idx;
+  state.active = true;
+  sceneState.set(scene, state);
+  v.play().catch(err => console.warn('play() failed:', err));
+}
+
+function playScene(btn) {
+  const scene = btn.closest('.scene');
+  const st = sceneState.get(scene) || {};
+  if (st.active) {
+    stopScene(scene);
+    return;
+  }
+  btn.textContent = '⏸ Stop';
+  playCell(scene, 0);
+}
+
+function stopFromBtn(btn) {
+  stopScene(btn.closest('.scene'));
+}
+
+function playAllTogether(btn) {
+  const scene = btn.closest('.scene');
+  const vids = [...scene.querySelectorAll('video')];
+  stopScene(scene);
+  // Mark as parallel playback so the per-video pause handler doesn't strip frames.
+  const state = sceneState.get(scene) || {};
+  state.parallel = true;
+  state.active = false;
+  sceneState.set(scene, state);
+  vids.forEach(v => {
+    v.muted = true;
+    v.currentTime = 0;
+    v.closest('.cell').classList.add('playing');
+    v.play().catch(err => console.warn('play() failed:', err));
+  });
+}
+
+function restart(btn) {
+  const scene = btn.closest('.scene');
+  stopScene(scene);
+  const playBtn = scene.querySelector('.btn-play');
+  playBtn.textContent = '⏸ Stop';
+  playCell(scene, 0);
+}
+
+// When a video ends, advance to the next cell in its scene.
+document.querySelectorAll('.cell video').forEach(v => {
+  v.addEventListener('ended', () => {
+    const scene = v.closest('.scene');
+    const st = sceneState.get(scene);
+    if (!st || !st.active) return;
+    playCell(scene, st.current + 1);
+  });
+  // Click a cell: play only that one (solo), not the full sequence.
+  v.addEventListener('click', () => {
+    const scene = v.closest('.scene');
+    const vids = [...scene.querySelectorAll('video')];
+    const idx = vids.indexOf(v);
+    const st = sceneState.get(scene) || {};
+    st.active = false;   // single-cell mode — no auto-advance
+    sceneState.set(scene, st);
+    vids.forEach(o => { o.pause(); o.muted = true; o.closest('.cell').classList.remove('playing'); });
+    v.currentTime = 0;
+    v.muted = false;
+    v.closest('.cell').classList.add('playing');
+    v.play();
+    const btn = scene.querySelector('.btn-play');
+    if (btn) btn.textContent = '▶ Play sequence';
+  });
+  v.addEventListener('pause', () => {
+    // If manually paused and not part of an active sequence or parallel run,
+    // drop the green frame.
+    const scene = v.closest('.scene');
+    const st = sceneState.get(scene);
+    if (!st || (!st.active && !st.parallel)) v.closest('.cell').classList.remove('playing');
+  });
+});
+
+// ── Prompt editor add-on ──────────────────────────────────────────────────
+const API_AVAILABLE = location.protocol.startsWith('http');
+
+async function loadPrompts() {
+  if (!API_AVAILABLE) {
+    document.getElementById('server-warn')?.style.setProperty('display', 'block');
+    document.querySelectorAll('details.prompts').forEach(d => {
+      d.querySelector('.prompts-body').innerHTML =
+        "<div style='color:#888;grid-column:1/span 2'>Start the local server to load + edit prompts:" +
+        "<br><code style='color:#9cf'>python serve_viewer.py</code></div>";
+    });
+    return;
+  }
+  try {
+    const resp = await fetch('/api/scenes');
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const data = await resp.json();
+    document.querySelectorAll('details.prompts').forEach(d => {
+      const scene = d.dataset.scene;
+      const s = data[scene];
+      if (!s) {
+        d.querySelector('.prompts-body').innerHTML =
+          "<div style='color:#888;grid-column:1/span 2'>No prompt data for this scene.</div>";
+        return;
+      }
+      d.querySelector('.baseline-text').textContent = s.baseline_prompt || "(empty)";
+      d.querySelector('.baseline-src').textContent  = 'source: ' + (s.baseline_source || '—');
+      d.querySelector('.t1-text').textContent       = s.t1_prompt || "(empty)";
+      const ta = d.querySelector('textarea.override');
+      if (s.override) {
+        ta.value = s.override.prompt;
+        d.querySelector('.override-meta').textContent = 'saved ' + s.override.updated;
+        d.querySelector('.override-del').disabled = false;
+      } else {
+        ta.placeholder = "Type a new baseline prompt…";
+        d.querySelector('.override-meta').textContent = '(no override saved)';
+        d.querySelector('.override-del').disabled = true;
+      }
+    });
+  } catch (err) {
+    console.error(err);
+    document.querySelectorAll('.prompts-body').forEach(b => {
+      b.innerHTML = "<div style='color:#f55;grid-column:1/span 2'>Failed to load prompts: " +
+                    err.message + "</div>";
+    });
+  }
+}
+
+async function saveOverride(btn) {
+  const details = btn.closest('details.prompts');
+  const scene = details.dataset.scene;
+  const ta = details.querySelector('textarea.override');
+  const status = details.querySelector('.override-status');
+  const prompt = ta.value.trim();
+  if (!prompt) { status.textContent = 'prompt is empty'; status.className = 'status err'; return; }
+  btn.disabled = true;
+  status.textContent = 'saving…'; status.className = 'status';
+  try {
+    const resp = await fetch('/api/override/' + encodeURIComponent(scene), {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({prompt}),
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || 'save failed');
+    status.textContent = '✓ saved ' + data.override.updated; status.className = 'status';
+    details.querySelector('.override-meta').textContent = 'saved ' + data.override.updated;
+    details.querySelector('.override-del').disabled = false;
+  } catch (err) {
+    status.textContent = '✗ ' + err.message; status.className = 'status err';
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function deleteOverride(btn) {
+  const details = btn.closest('details.prompts');
+  const scene = details.dataset.scene;
+  const status = details.querySelector('.override-status');
+  if (!confirm('Delete the saved override for ' + scene + '?')) return;
+  btn.disabled = true;
+  try {
+    const resp = await fetch('/api/override/' + encodeURIComponent(scene), {method: 'DELETE'});
+    if (!resp.ok) throw new Error('delete failed');
+    details.querySelector('textarea.override').value = '';
+    details.querySelector('.override-meta').textContent = '(no override saved)';
+    status.textContent = 'deleted'; status.className = 'status';
+  } catch (err) {
+    status.textContent = '✗ ' + err.message; status.className = 'status err';
+    btn.disabled = false;
+  }
+}
+
+document.addEventListener('DOMContentLoaded', loadPrompts);
+
+// Spacebar plays/stops the scene currently most in view.
+document.addEventListener('keydown', e => {
+  if (e.code !== 'Space' || e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+  e.preventDefault();
+  const scenes = [...document.querySelectorAll('.scene')];
+  const vh = window.innerHeight;
+  const inView = scenes.find(s => {
+    const r = s.getBoundingClientRect();
+    return r.top < vh * 0.5 && r.bottom > vh * 0.2;
+  }) || scenes[0];
+  if (inView) playScene(inView.querySelector('.btn-play'));
+});
+</script></body></html>

@@ -32,8 +32,11 @@ import threading
 import webbrowser
 from pathlib import Path
 
-SCRIPT_DIR  = Path(__file__).resolve().parent
-RESULTS_DIR = SCRIPT_DIR / "lora_results_FIX" / "benchmarks"
+SCRIPT_DIR   = Path(__file__).resolve().parent
+RESULTS_DIRS = [
+    SCRIPT_DIR / "lora_results_FIX" / "benchmarks",
+    SCRIPT_DIR / "lora_results_FIX" / "benchmarks" / "skye_exp3_highcap" / "benchmarks",
+]
 
 SCENE_ORDER = ["bey", "crsms", "holoween", "party", "snow",
                "of_silly_goose", "of_eagle", "of_lifeguard", "of_lift", "of_everest"]
@@ -53,31 +56,51 @@ EXP_LABELS = {
     "skye_exp1_baseline": "EXP-1  Baseline  (rank 16, 1k steps)",
     "skye_exp2_standard": "EXP-2  T2V  (rank 32, 5k steps)",
     "skye_exp2_10k":      "EXP-2-10K  T2V  (rank 32, 10k steps)",
+    "skye_exp3_highcap":  "EXP-3  HighCap  (rank 32 + FFN, 15k steps)",
     "skye_exp4_i2v":      "EXP-4  I2V  (rank 32, 2.5k steps)",
-    "skye_exp4_10k":      "EXP-4-10K  I2V  (rank 32, 10k steps)",
+    "skye_exp4_10k":           "EXP-4-10K  I2V  (rank 32, 10k steps)",
+    "skye_exp3_highres":       "EXP-3-HiRes  T2V+FFN  (768×1024, 50% I2V)",
+    "skye_exp5_clean_highres": "EXP-5  Clean+HiRes  I2V+FFN  (768×1024, 80% I2V)",
 }
-# EXP-3 (highcap / highres) was never run — no data exists for it.
 
 
 def discover() -> dict:
     """{ exp: { step_int: { scene: rel_path_to_lora_mp4 } } }"""
     data: dict[str, dict[int, dict[str, str]]] = {}
-    for exp_dir in sorted(RESULTS_DIR.iterdir()):
-        if not exp_dir.is_dir() or exp_dir.name.startswith("_"):
+    for results_dir in RESULTS_DIRS:
+        if not results_dir.is_dir():
             continue
-        exp = exp_dir.name
-        data[exp] = {}
-        for step_dir in sorted(exp_dir.iterdir()):
-            if not step_dir.is_dir():
+        for exp_dir in sorted(results_dir.iterdir()):
+            if not exp_dir.is_dir() or exp_dir.name.startswith("_"):
                 continue
-            step = int(step_dir.name.replace("step_", ""))
-            scenes: dict[str, str] = {}
-            for f in step_dir.glob("*_lora.mp4"):
-                scene = f.stem.replace("_lora", "")
-                scenes[scene] = str(f.relative_to(SCRIPT_DIR))
-            if scenes:
-                data[exp][step] = scenes
+            exp = exp_dir.name
+            if exp not in data:
+                data[exp] = {}
+            for step_dir in sorted(exp_dir.iterdir()):
+                if not step_dir.is_dir() or not step_dir.name.startswith("step_"):
+                    continue
+                step = int(step_dir.name.replace("step_", ""))
+                scenes: dict[str, str] = {}
+                for f in step_dir.glob("*_lora.mp4"):
+                    scene = f.stem.replace("_lora", "")
+                    scenes[scene] = str(f.relative_to(SCRIPT_DIR))
+                if scenes:
+                    data[exp][step] = scenes
     return data
+
+
+def discover_base() -> dict[str, str]:
+    """{ scene: rel_path } for base (no-LoRA) reference videos."""
+    base: dict[str, str] = {}
+    for results_dir in RESULTS_DIRS:
+        base_dir = results_dir / "_base"
+        if not base_dir.is_dir():
+            continue
+        for f in base_dir.glob("*.mp4"):
+            scene = f.stem  # no _lora suffix
+            if scene not in base:
+                base[scene] = str(f.relative_to(SCRIPT_DIR))
+    return base
 
 
 HTML = r"""<!DOCTYPE html>
@@ -118,25 +141,56 @@ h1 { font-size: 15px; color: #fff; white-space: nowrap; }
 #status { font-size: 11px; color: #c0392b; min-width: 180px; }
 
 /* ── column headers ── */
-.col-headers { display: grid; grid-template-columns: 120px 1fr 1fr; }
+.col-headers { display: grid; grid-template-columns: 140px 1fr 1fr 0.55fr; }
 .chdr { padding: 9px 12px 7px; font-size: 12px; font-weight: 600; text-align: center;
         background: #0f0f0f; border-bottom: 2px solid #1a1a1a; }
 .chdr.left  { color: #60a5fa; border-left: 3px solid #2563eb; }
 .chdr.right { color: #fb923c; border-left: 3px solid #ea580c; }
+.chdr.base  { color: #4ade80; border-left: 3px solid #16a34a; font-size: 10px; }
 .chdr.scene-hdr { color: #333; font-size: 10px; text-transform: uppercase; letter-spacing: .07em;
                   text-align: left; }
 
 /* ── rows ── */
-.scene-row { display: grid; grid-template-columns: 120px 1fr 1fr;
+.scene-row { display: grid; grid-template-columns: 140px 1fr 1fr 0.55fr;
              border-bottom: 1px solid #111; }
 .scene-row:hover { background: #0d0d0d; }
-.scene-lbl { display: flex; align-items: center; padding: 0 10px;
+.scene-lbl { display: flex; align-items: center; gap: 8px; padding: 0 10px;
              font-size: 12px; color: #777; font-weight: 500; }
+
+/* ── per-row controls ── */
+.row-ctrl { display: flex; flex-direction: column; align-items: center; gap: 4px; flex-shrink: 0; }
+
+.row-play-btn {
+  cursor: pointer;
+  width: 26px; height: 26px;
+  border-radius: 50%;
+  border: 1px solid #2a2a2a;
+  background: #161616;
+  color: #60a5fa;
+  font-size: 9px;
+  display: flex; align-items: center; justify-content: center;
+  transition: background 0.15s, color 0.15s;
+  line-height: 1;
+}
+.row-play-btn:hover { background: #2563eb; color: #fff; border-color: #2563eb; }
+.row-play-btn.active { background: #1e3a5f; color: #93c5fd; border-color: #2563eb44; }
+
+/* phase indicator dots */
+.phase-pips { display: flex; gap: 3px; }
+.phase-pips span {
+  width: 5px; height: 5px; border-radius: 50%;
+  background: #222; transition: background 0.2s;
+}
+/* pip 0 = both muted (gray), pip 1 = left audio (blue), pip 2 = right audio (orange) */
+.phase-pips span.p0.lit { background: #555; }
+.phase-pips span.p1.lit { background: #2563eb; }
+.phase-pips span.p2.lit { background: #ea580c; }
 
 .vcell { padding: 6px 8px; }
 video { width: 100%; border-radius: 7px; background: #000; display: block; cursor: pointer; }
-video.master { border-top: 3px solid #2563eb55; }
+video.row-master { border-top: 3px solid #2563eb55; }
 .vcell.right video { border-top: 3px solid #ea580c55; }
+.vcell.base video  { border-top: 3px solid #16a34a55; opacity: 0.85; }
 
 .section-sep { grid-column: 1/-1; background: #0f0f0f; color: #2a2a2a;
   font-size: 10px; text-transform: uppercase; letter-spacing: .07em; padding: 5px 14px; }
@@ -174,6 +228,7 @@ video.master { border-top: 3px solid #2563eb55; }
   <div class="chdr scene-hdr">Scene</div>
   <div class="chdr left"  id="hdr-left">—</div>
   <div class="chdr right" id="hdr-right">—</div>
+  <div class="chdr base">Base model<br><span style="font-size:9px;color:#555;font-weight:400">(no LoRA)</span></div>
 </div>
 
 <div id="rows"></div>
@@ -183,16 +238,24 @@ const DATA        = __DATA__;
 const EXP_LABELS  = __EXP_LABELS__;
 const SCENE_ORDER = __SCENE_ORDER__;
 const SCENE_LABELS= __SCENE_LABELS__;
+const BASE_SCENES = __BASE_SCENES__;
 const MAIN_SCENES = ["bey","crsms","holoween","party","snow"];
 
-// ── Options list ─────────────────────────────────────────────────────────────
+// ── Options list — focus exps only, 1k-step intervals ────────────────────────
+const FOCUS_EXPS = ["skye_exp2_standard", "skye_exp2_10k", "skye_exp3_highcap", "skye_exp4_10k", "skye_exp3_highres", "skye_exp5_clean_highres"];
 const OPTIONS = [];
-Object.entries(DATA).forEach(([exp, steps]) => {
-    const label = EXP_LABELS[exp] || exp;
-    Object.keys(steps).map(Number).sort((a,b)=>a-b).forEach(step => {
-        OPTIONS.push({ exp, step, label: `${label}  —  step ${step.toLocaleString()}` });
+Object.entries(DATA)
+    .filter(([exp]) => FOCUS_EXPS.includes(exp))
+    .sort(([a], [b]) => FOCUS_EXPS.indexOf(a) - FOCUS_EXPS.indexOf(b))
+    .forEach(([exp, steps]) => {
+        const label = EXP_LABELS[exp] || exp;
+        Object.keys(steps).map(Number)
+            .filter(s => s % 1000 === 0)
+            .sort((a, b) => a - b)
+            .forEach(step => {
+                OPTIONS.push({ exp, step, label: `${label}  —  step ${step.toLocaleString()}` });
+            });
     });
-});
 
 function populateSelect(id, defExp, defStep) {
     const sel = document.getElementById(id);
@@ -208,73 +271,137 @@ function populateSelect(id, defExp, defStep) {
 populateSelect('sel-left',  'skye_exp2_10k', 5000);
 populateSelect('sel-right', 'skye_exp2_10k', 10000);
 
-// ── Master-follower sync ──────────────────────────────────────────────────────
-let master = null;
-const status = document.getElementById('status');
+// ── Phase definitions ─────────────────────────────────────────────────────────
+// phase 0 = idle  (no playback)
+// phase 1 = both muted  (pure visual diff)
+// phase 2 = left audio, right muted
+// phase 3 = left muted, right audio
+const PHASES = [
+    null,                                         // 0 idle — unused
+    { leftMuted: true,  rightMuted: true  },      // 1 visual
+    { leftMuted: false, rightMuted: true  },      // 2 left audio
+    { leftMuted: true,  rightMuted: false },      // 3 right audio
+];
+
+const status   = document.getElementById('status');
 const progress = document.getElementById('progress');
 const timeDisp = document.getElementById('time-disp');
 
-function followers() {
-    const all = [...document.querySelectorAll('video')];
-    return all.filter(v => v !== master);
+let rowData = [];  // [{ left, right, btn, pips, phase }]
+
+function updateRowUI(rd) {
+    const idle    = rd.phase === 0;
+    const paused  = rd.left?.paused ?? true;
+    if (rd.btn) {
+        rd.btn.textContent = (idle || paused) ? '▶' : '⏸';
+        rd.btn.classList.toggle('active', !idle && !paused);
+    }
+    if (rd.pips) {
+        rd.pips.forEach((pip, i) => {
+            pip.classList.toggle('lit', i + 1 === rd.phase);
+        });
+    }
 }
-function allVids() { return [...document.querySelectorAll('video')]; }
 
-function attachSync() {
-    const vs = allVids();
-    if (!vs.length) { status.textContent = 'No videos found'; return; }
+function applyPhase(rd) {
+    const cfg = PHASES[rd.phase];
+    if (!cfg) return;
+    if (rd.left)  rd.left.muted  = cfg.leftMuted;
+    if (rd.right) rd.right.muted = cfg.rightMuted;
+    if (rd.base)  rd.base.muted  = true;   // base is always muted — visual reference only
+}
 
-    master = vs[0];
-    master.classList.add('master');
-    status.textContent = '';
+function startPhase(rd, phase) {
+    rd.phase = phase;
+    applyPhase(rd);
+    if (rd.left)  rd.left.currentTime  = 0;
+    if (rd.right) rd.right.currentTime = 0;
+    if (rd.base)  rd.base.currentTime  = 0;
+    rd.left?.play().catch(err => { status.textContent = '▶ failed: ' + err.message; });
+    updateRowUI(rd);
+}
 
-    // Master drives followers
-    master.addEventListener('timeupdate', () => {
-        const t = master.currentTime;
-        // Update scrub bar
-        if (master.duration) {
-            progress.value = Math.round((t / master.duration) * 1000);
+function attachRowSync(rd) {
+    const { left, right, base } = rd;
+    left.classList.add('row-master');
+    rd.phase = 0;
+
+    // Sync right + base to left
+    left.addEventListener('timeupdate', () => {
+        const t = left.currentTime;
+        if (right && Math.abs(right.currentTime - t) > 0.15) right.currentTime = t;
+        if (base  && Math.abs(base.currentTime  - t) > 0.15) base.currentTime  = t;
+        if (rowData[0]?.left === left && left.duration) {
+            progress.value = Math.round((t / left.duration) * 1000);
             timeDisp.textContent = t.toFixed(1) + ' s';
         }
-        // Sync followers (correct drift > 0.15s)
-        followers().forEach(v => {
-            if (Math.abs(v.currentTime - t) > 0.15) v.currentTime = t;
-        });
+    });
+    left.addEventListener('play',  () => {
+        right?.play().catch(()=>{});
+        base?.play().catch(()=>{});
+        updateRowUI(rd);
+    });
+    left.addEventListener('pause', () => { right?.pause(); base?.pause(); updateRowUI(rd); });
+    left.addEventListener('error', () => {
+        status.textContent = 'Load error: ' + (left.error?.message || '?');
     });
 
-    master.addEventListener('play',  () => followers().forEach(v => v.play().catch(()=>{})));
-    master.addEventListener('pause', () => followers().forEach(v => v.pause()));
-    master.addEventListener('ended', () => followers().forEach(v => v.pause()));
-
-    master.addEventListener('error', e => {
-        status.textContent = 'Error loading master video: ' + (master.error?.message || '?');
+    // Auto-advance phases when a phase finishes
+    left.addEventListener('ended', () => {
+        right?.pause();
+        if (rd.phase > 0 && rd.phase < 3) {
+            // Skip phases that have no video for that side
+            let next = rd.phase + 1;
+            if (next === 2 && !rd.left)  next++;   // no left  → skip left-audio phase
+            if (next === 3 && !rd.right) next++;   // no right → skip right-audio phase
+            if (next <= 3) { startPhase(rd, next); return; }
+        }
+        rd.phase = 0;
+        updateRowUI(rd);
     });
 
-    // Scrub bar seeks all videos
-    progress.addEventListener('input', () => {
-        if (!master.duration) return;
-        const t = (progress.value / 1000) * master.duration;
-        allVids().forEach(v => { v.currentTime = t; });
-        timeDisp.textContent = t.toFixed(1) + ' s';
+    // Row play button — starts full 3-phase sequence, or pauses/resumes mid-phase
+    rd.btn?.addEventListener('click', e => {
+        e.stopPropagation();
+        if (rd.phase === 0) {
+            startPhase(rd, 1);
+        } else if (left.paused) {
+            left.play().catch(err => { status.textContent = '▶ failed: ' + err.message; });
+        } else {
+            left.pause();
+        }
     });
 
-    // Click any video = toggle play/pause via master
-    allVids().forEach(v => {
+    // Click video = same as button
+    [left, right].filter(Boolean).forEach(v => {
         v.addEventListener('click', () => {
-            if (master.paused) master.play().catch(err => { status.textContent = '▶ failed: ' + err.message; });
-            else master.pause();
+            if (rd.phase === 0) { startPhase(rd, 1); }
+            else if (left.paused) { left.play().catch(()=>{}); }
+            else { left.pause(); }
         });
     });
 }
 
+// ── Global transport ──────────────────────────────────────────────────────────
 function play() {
-    if (!master) { status.textContent = 'No videos loaded yet'; return; }
-    master.currentTime = 0;
-    const p = master.play();
-    if (p) p.catch(err => { status.textContent = '▶ failed: ' + err.message; });
+    if (!rowData.length) { status.textContent = 'No videos loaded yet'; return; }
+    rowData.forEach(rd => startPhase(rd, 1));
 }
-function pause()   { if (master) master.pause(); }
+function pause()   { rowData.forEach(rd => { rd.left?.pause(); }); }
 function restart() { play(); }
+
+// Global scrub seeks all videos
+progress.addEventListener('input', () => {
+    const first = rowData[0]?.left;
+    if (!first?.duration) return;
+    const t = (progress.value / 1000) * first.duration;
+    rowData.forEach(rd => {
+        if (rd.left)  rd.left.currentTime  = t;
+        if (rd.right) rd.right.currentTime = t;
+        if (rd.base)  rd.base.currentTime  = t;
+    });
+    timeDisp.textContent = t.toFixed(1) + ' s';
+});
 
 // ── Render ───────────────────────────────────────────────────────────────────
 function render() {
@@ -295,21 +422,46 @@ function render() {
             html += '<div class="scene-row"><div class="section-sep">Overfit / training-data scenes</div></div>';
         }
         const ls = lScenes[scene], rs = rScenes[scene];
-        html += `<div class="scene-row">`;
-        html += `<div class="scene-lbl">${SCENE_LABELS[scene] || scene}</div>`;
+        const hasVideos = ls || rs;
+        const ctrl = hasVideos ? `
+            <div class="row-ctrl">
+              <button class="row-play-btn" title="Play: visual → left audio → right audio">▶</button>
+              <div class="phase-pips">
+                <span class="p0" title="Visual (both muted)"></span>
+                <span class="p1" title="Left audio"></span>
+                <span class="p2" title="Right audio"></span>
+              </div>
+            </div>` : '';
+        const bs = BASE_SCENES[scene];
+        html += `<div class="scene-row" data-scene="${scene}">`;
+        html += `<div class="scene-lbl">${ctrl}<span>${SCENE_LABELS[scene] || scene}</span></div>`;
         html += `<div class="vcell left">`  + (ls ? `<video src="/${ls}" preload="auto" playsinline></video>` : '<div style="color:#222;padding:20px;text-align:center">—</div>') + `</div>`;
-        html += `<div class="vcell right">` + (rs ? `<video src="/${rs}" preload="auto" muted playsinline></video>` : '<div style="color:#222;padding:20px;text-align:center">—</div>') + `</div>`;
+        html += `<div class="vcell right">` + (rs ? `<video src="/${rs}" preload="auto" playsinline></video>` : '<div style="color:#222;padding:20px;text-align:center">—</div>') + `</div>`;
+        html += `<div class="vcell base">` + (bs ? `<video src="/${bs}" preload="auto" muted playsinline></video>` : '<div style="color:#1a1a1a;padding:20px;text-align:center">—</div>') + `</div>`;
         html += `</div>`;
     });
 
     document.getElementById('rows').innerHTML = html;
-
-    // Reset scrub bar
     progress.value = 0;
     timeDisp.textContent = '0.0 s';
-    master = null;
+    status.textContent = '';
 
-    attachSync();
+    rowData = [];
+    document.querySelectorAll('.scene-row[data-scene]').forEach(rowEl => {
+        const left  = rowEl.querySelector('.vcell.left video');
+        const right = rowEl.querySelector('.vcell.right video');
+        const base  = rowEl.querySelector('.vcell.base video');
+        const btn   = rowEl.querySelector('.row-play-btn');
+        const pips  = [...rowEl.querySelectorAll('.phase-pips span')];
+        if (!left && !right) return;
+        // All start muted; phases control unmuting
+        if (left)  left.muted  = true;
+        if (right) right.muted = true;
+        if (base)  base.muted  = true;
+        const rd = { left: left || right, right: left ? right : null, base: base || null, btn, pips, phase: 0 };
+        rowData.push(rd);
+        attachRowSync(rd);
+    });
 }
 
 render();
@@ -348,6 +500,7 @@ def main() -> None:
         exp: {str(step): scenes for step, scenes in steps.items()}
         for exp, steps in data.items()
     }
+    base_scenes = discover_base()
 
     page_html = (
         HTML
@@ -355,13 +508,13 @@ def main() -> None:
         .replace("__EXP_LABELS__",  json.dumps(EXP_LABELS))
         .replace("__SCENE_ORDER__", json.dumps(SCENE_ORDER))
         .replace("__SCENE_LABELS__",json.dumps(SCENE_LABELS))
+        .replace("__BASE_SCENES__", json.dumps(base_scenes))
     )
 
     handler = functools.partial(Handler, page_html=page_html)
     server  = http.server.HTTPServer(("127.0.0.1", args.port), handler)
     print(f"Gallery: http://127.0.0.1:{args.port}")
     print("Defaults: EXP-2-10K step 5,000 (left, with audio) vs step 10,000 (right, muted)")
-    print("Note: EXP-3 was never run — no data exists for it.")
     print("Press Ctrl+C to stop.\n")
     threading.Timer(0.4, lambda: webbrowser.open(f"http://127.0.0.1:{args.port}")).start()
     server.serve_forever()

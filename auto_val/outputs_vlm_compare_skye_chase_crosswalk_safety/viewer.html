@@ -1,0 +1,583 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Trampoline Scene — VLM Model Comparison</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+      background: #0e0e11;
+      color: #e6e6e6;
+      overflow: hidden;
+      display: flex; flex-direction: column;
+    }
+    header {
+      padding: 14px 22px;
+      background: #191920;
+      border-bottom: 1px solid #28282e;
+      display: flex; align-items: center; gap: 16px; flex-shrink: 0;
+    }
+    h1 { font-size: 18px; margin: 0; font-weight: 600; }
+    .subtitle { color: #888; font-size: 13px; }
+
+    .model-tabs {
+      display: flex; gap: 6px;
+      padding: 12px 22px;
+      background: #131318;
+      border-bottom: 1px solid #28282e;
+      overflow-x: auto; flex-shrink: 0;
+    }
+    .tab {
+      padding: 10px 14px;
+      background: #222229;
+      border: 1px solid #32323a;
+      border-radius: 8px;
+      cursor: pointer; font-size: 13px;
+      white-space: nowrap;
+      display: flex; align-items: center; gap: 8px;
+      transition: background 0.15s;
+    }
+    .tab:hover { background: #2a2a33; }
+    .tab.active { background: #2a5a8a; border-color: #4a80c0; color: #fff; }
+    .tab .score { font-weight: 700; font-size: 14px; }
+    .tab .verdict-dot {
+      display: inline-block; width: 10px; height: 10px; border-radius: 50%;
+    }
+    .verdict-PASS { background: #4caf50; }
+    .verdict-CONDITIONAL_PASS { background: #ffb300; }
+    .verdict-FAIL { background: #f44336; }
+
+    main {
+      flex: 1;
+      display: grid;
+      grid-template-columns: minmax(320px, 1fr) minmax(400px, 1.2fr);
+      overflow: hidden; min-height: 0;
+    }
+
+    .video-pane {
+      background: #000;
+      display: flex; flex-direction: column;
+      overflow: hidden;
+    }
+    .video-wrapper {
+      flex: 1;
+      display: flex; align-items: center; justify-content: center;
+      background: #000; overflow: hidden;
+    }
+    video { max-width: 100%; max-height: 100%; display: block; }
+    .video-meta {
+      padding: 10px 16px;
+      background: #181820;
+      font-size: 12px; color: #aaa;
+      border-top: 1px solid #28282e;
+      font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    }
+
+    .report-pane {
+      overflow-y: auto;
+      padding: 24px 30px 40px;
+      background: #151519;
+      border-left: 1px solid #28282e;
+    }
+
+    .verdict-card {
+      background: linear-gradient(180deg, #1e1e26 0%, #18181e 100%);
+      border: 1px solid #2f2f36;
+      border-radius: 12px;
+      padding: 22px 24px;
+      margin-bottom: 20px;
+    }
+    .verdict-card .score-row {
+      display: flex; align-items: baseline; gap: 20px; margin-bottom: 8px;
+    }
+    .verdict-card .score {
+      font-size: 42px; font-weight: 700; line-height: 1;
+    }
+    .verdict-card .score.PASS { color: #4caf50; }
+    .verdict-card .score.CONDITIONAL_PASS { color: #ffb300; }
+    .verdict-card .score.FAIL { color: #f44336; }
+    .verdict-card .verdict-badge {
+      padding: 5px 12px; border-radius: 6px;
+      font-size: 12px; font-weight: 700; letter-spacing: 0.5px;
+    }
+    .verdict-badge.PASS { background: #2d5731; color: #c8e6c9; }
+    .verdict-badge.CONDITIONAL_PASS { background: #574026; color: #ffe0b2; }
+    .verdict-badge.FAIL { background: #5c1f1f; color: #ffcdd2; }
+    .verdict-card .headline {
+      font-size: 16px; color: #e6e6e6;
+      line-height: 1.5; margin-top: 8px;
+    }
+
+    .highlight-block {
+      background: #1a1a20; border: 1px solid #2a2a32;
+      border-left: 3px solid #666;
+      border-radius: 8px;
+      padding: 14px 18px;
+      margin-bottom: 12px;
+    }
+    .highlight-block.works { border-left-color: #4caf50; }
+    .highlight-block.breaks { border-left-color: #f44336; }
+    .highlight-block.top { border-left-color: #ffb300; }
+    .highlight-block .label {
+      font-size: 11px; letter-spacing: 0.5px; text-transform: uppercase;
+      font-weight: 600; color: #999; margin-bottom: 6px;
+    }
+    .highlight-block.works .label { color: #4caf50; }
+    .highlight-block.breaks .label { color: #f44336; }
+    .highlight-block.top .label { color: #ffb300; }
+    .highlight-block .body { font-size: 14px; line-height: 1.55; color: #ddd; }
+
+    h2.section {
+      font-size: 13px; color: #888;
+      text-transform: uppercase; letter-spacing: 0.5px;
+      margin: 26px 0 12px; font-weight: 600;
+    }
+
+    .agent-card {
+      background: #1a1a20; border: 1px solid #2a2a32;
+      border-left: 4px solid #666;
+      border-radius: 8px;
+      padding: 14px 18px;
+      margin-bottom: 10px;
+    }
+    .agent-card.great { border-left-color: #4caf50; }
+    .agent-card.minor_issues { border-left-color: #ffb300; }
+    .agent-card.major_issues { border-left-color: #f44336; }
+    .agent-card .head {
+      display: flex; justify-content: space-between; align-items: center;
+      margin-bottom: 8px;
+    }
+    .agent-card .title { font-weight: 600; font-size: 14px; color: #e6e6e6; }
+    .agent-card .badge {
+      padding: 3px 9px; border-radius: 4px;
+      font-size: 10px; font-weight: 700; letter-spacing: 0.4px;
+    }
+    .badge.great { background: #2d5731; color: #c8e6c9; }
+    .badge.minor_issues { background: #574026; color: #ffe0b2; }
+    .badge.major_issues { background: #5c1f1f; color: #ffcdd2; }
+    .agent-card .summary {
+      font-size: 14px; font-weight: 500; color: #d8d8d8;
+      line-height: 1.4; margin-bottom: 8px;
+    }
+    .agent-card .findings {
+      font-size: 13px; color: #b0b0b0;
+      line-height: 1.6;
+      max-height: 0; overflow: hidden;
+      transition: max-height 0.25s ease-out;
+    }
+    .agent-card.expanded .findings { max-height: 1500px; padding-top: 4px; }
+    .agent-card .toggle {
+      font-size: 11px; color: #6aa6e6; cursor: pointer;
+      margin-top: 2px; display: inline-block;
+    }
+
+    /* Prompt Reasoner (Deduction Engine) */
+    .reasoner-card {
+      background: linear-gradient(180deg, #1e1a26 0%, #181520 100%);
+      border: 1px solid #3a2f4a;
+      border-left: 4px solid #a070d0;
+      border-radius: 10px;
+      padding: 16px 18px;
+      margin-bottom: 14px;
+    }
+    .reasoner-card .r-title {
+      font-size: 13px; color: #c8a6ff;
+      text-transform: uppercase; letter-spacing: 0.6px;
+      font-weight: 700; margin-bottom: 8px;
+    }
+    .reasoner-card .r-rationale {
+      font-size: 14px; color: #e6e0f0; line-height: 1.55;
+      margin-bottom: 12px;
+    }
+    .reasoner-card .r-subhead {
+      font-size: 11px; color: #a090c0;
+      text-transform: uppercase; letter-spacing: 0.5px;
+      font-weight: 600; margin: 10px 0 6px;
+    }
+    .reasoner-card ul { margin: 0 0 8px 0; padding-left: 18px; }
+    .reasoner-card li { font-size: 13px; color: #cbc4d8; line-height: 1.55; margin-bottom: 6px; }
+    .reasoner-card li code, .reasoner-card .mono {
+      font-family: ui-monospace, "SF Mono", Menlo, monospace;
+      background: #2a2232; color: #e4d6f5;
+      padding: 1px 5px; border-radius: 3px; font-size: 12px;
+    }
+    .reasoner-card .op {
+      display: inline-block; font-size: 10px; font-weight: 700;
+      padding: 2px 6px; border-radius: 3px; letter-spacing: 0.4px;
+      background: #3a2f4a; color: #d8c4f5; margin-right: 6px;
+    }
+    .reasoner-card .conf {
+      font-size: 10px; color: #b090d0;
+      text-transform: uppercase; letter-spacing: 0.4px;
+      margin-left: 6px;
+    }
+    .reasoner-card .capacity {
+      font-size: 10px; font-style: italic; color: #d78a8a; margin-left: 6px;
+    }
+    .reasoner-rewritten {
+      font-family: ui-monospace, "SF Mono", Menlo, monospace;
+      font-size: 12px; line-height: 1.55;
+      background: #15121c; color: #e0d6f0;
+      border: 1px solid #3a2f4a; border-radius: 6px;
+      padding: 10px 12px; white-space: pre-wrap;
+      margin-top: 4px;
+    }
+    .reasoner-skipped {
+      font-size: 12px; color: #9a8eb0; font-style: italic;
+    }
+
+    .prompt-box, .transcript-box {
+      font-size: 12px; color: #aaa; background: #1a1a20;
+      border: 1px solid #2a2a32; border-radius: 8px;
+      padding: 12px 14px;
+      max-height: 220px; overflow-y: auto;
+      white-space: pre-wrap;
+      font-family: ui-monospace, "SF Mono", Menlo, monospace;
+      line-height: 1.55;
+    }
+    .loading { color: #777; padding: 24px; text-align: center; }
+
+    /* Inputs section */
+    .inputs-note {
+      font-size: 12px; color: #aaa; line-height: 1.5;
+      margin-bottom: 10px;
+    }
+    .inputs-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+    .input-card {
+      background: #1a1a20; border: 1px solid #2a2a32;
+      border-radius: 8px; padding: 10px;
+      cursor: zoom-in;
+      transition: border-color 0.15s;
+    }
+    .input-card:hover { border-color: #4a80c0; }
+    .input-card .input-label {
+      font-size: 11px; color: #ddd; font-weight: 600;
+      margin-bottom: 6px; letter-spacing: 0.3px;
+    }
+    .input-card img {
+      width: 100%; display: block;
+      background: #000; border-radius: 4px;
+    }
+    .input-card .input-consumers {
+      font-size: 10px; color: #8aaccb; margin-top: 6px;
+      font-style: italic;
+    }
+    .inputs-badge {
+      font-size: 11px; color: #8aaccb;
+      background: #152230; border-radius: 4px;
+      padding: 4px 8px; margin: 6px 0 8px;
+      display: inline-block;
+      font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    }
+
+    /* Modal for full-size grid */
+    .modal-backdrop {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.92);
+      display: none; align-items: center; justify-content: center;
+      z-index: 1000; padding: 40px;
+      cursor: zoom-out;
+    }
+    .modal-backdrop.open { display: flex; }
+    .modal-backdrop img {
+      max-width: 100%; max-height: 85vh;
+      border-radius: 6px; display: block;
+    }
+    .modal-caption {
+      position: absolute; top: 18px; left: 50%;
+      transform: translateX(-50%);
+      color: #fff; font-size: 14px;
+      background: rgba(0,0,0,0.6);
+      padding: 6px 14px; border-radius: 4px;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>🎬 Trampoline Scene — VLM Model Comparison</h1>
+    <span class="subtitle" id="subtitle">Loading…</span>
+  </header>
+
+  <div class="model-tabs" id="tabs"></div>
+
+  <main>
+    <div class="video-pane">
+      <div class="video-wrapper">
+        <video id="video" controls autoplay loop playsinline></video>
+      </div>
+      <div class="video-meta" id="video-meta">—</div>
+    </div>
+    <div class="report-pane" id="report-pane">
+      <div class="loading">Select a model above to view its report.</div>
+    </div>
+  </main>
+
+  <div class="modal-backdrop" id="modal" onclick="closeModal()">
+    <div class="modal-caption" id="modal-caption"></div>
+    <img id="modal-img" alt="">
+  </div>
+
+<script>
+let manifest = [];
+
+async function init() {
+  try {
+    manifest = await (await fetch('manifest.json')).json();
+  } catch (e) {
+    document.getElementById('report-pane').innerHTML =
+      '<div class="loading">Cannot load manifest.json. Run the pipeline first.</div>';
+    return;
+  }
+  document.getElementById('subtitle').textContent =
+    `${manifest.length} models evaluated — sorted by VLM score`;
+
+  const order = [...manifest.keys()].sort((a, b) => manifest[b].score - manifest[a].score);
+  const tabsEl = document.getElementById('tabs');
+  order.forEach(i => {
+    const m = manifest[i];
+    const tab = document.createElement('div');
+    tab.className = 'tab';
+    tab.dataset.idx = i;
+    const vClass = `verdict-${m.verdict}`;
+    tab.innerHTML = `
+      <span class="verdict-dot ${vClass}"></span>
+      <span class="score">${m.score}</span>
+      <span>${m.model}</span>
+    `;
+    tab.onclick = () => selectModel(i);
+    tabsEl.appendChild(tab);
+  });
+  if (manifest.length > 0) selectModel(order[0]);
+}
+
+async function selectModel(idx) {
+  const m = manifest[idx];
+
+  document.querySelectorAll('.tab').forEach(t => {
+    t.classList.toggle('active', parseInt(t.dataset.idx) === idx);
+  });
+
+  const video = document.getElementById('video');
+  video.src = `${m.folder}/${encodeURIComponent(m.video)}`;
+  video.muted = false;
+  video.load();
+  video.play().catch(() => {
+    video.muted = true;
+    video.play().catch(() => {});
+  });
+
+  document.getElementById('video-meta').textContent = `${m.model} · ${m.video}`;
+  document.getElementById('report-pane').innerHTML = '<div class="loading">Loading report…</div>';
+
+  try {
+    const report = await (await fetch(`${m.folder}/report.json`)).json();
+    renderReport(m, report);
+  } catch (e) {
+    document.getElementById('report-pane').innerHTML =
+      `<div class="loading">Failed to load report: ${e.message}</div>`;
+  }
+}
+
+function renderReport(m, report) {
+  const agg = report.aggregator || {};
+  const verdict = agg.overall_verdict || 'FAIL';
+  const score = agg.score || 0;
+
+  let html = `
+    <div class="verdict-card">
+      <div class="score-row">
+        <div class="score ${verdict}">${score}<span style="font-size:20px; color:#666;"> / 100</span></div>
+        <span class="verdict-badge ${verdict}">${verdict.replace('_', ' ')}</span>
+      </div>
+      <div class="headline">${escapeHtml(agg.headline || '')}</div>
+    </div>
+
+    ${agg.what_works ? `
+      <div class="highlight-block works">
+        <div class="label">✓ What works</div>
+        <div class="body">${escapeHtml(agg.what_works)}</div>
+      </div>` : ''}
+    ${agg.what_breaks ? `
+      <div class="highlight-block breaks">
+        <div class="label">✗ What breaks</div>
+        <div class="body">${escapeHtml(agg.what_breaks)}</div>
+      </div>` : ''}
+    ${agg.top_issue ? `
+      <div class="highlight-block top">
+        <div class="label">⚠ Top issue to fix</div>
+        <div class="body">${escapeHtml(agg.top_issue)}</div>
+      </div>` : ''}
+
+    ${renderPromptReasoner(report.prompt_reasoner)}
+
+    <h2 class="section">Inputs fed to the VLM</h2>
+    <div class="inputs-note">
+      <strong>Every agent receives the full native video</strong> (the .mp4 above — ~240 frames + audio).
+      Some agents additionally receive one of these evidence images plus text context.
+      All crops use Gemini-Flash-detected bounding boxes for the character's body and face.
+    </div>
+    <div class="inputs-grid">
+      <div class="input-card" onclick="openModal('${m.folder}/keyframe_grid.png', 'Keyframe grid — 16 full frames, 4×4')">
+        <div class="input-label">Keyframe grid · 4×4 full frames</div>
+        <img src="${m.folder}/keyframe_grid.png" alt="keyframe grid" onerror="this.style.display='none'">
+        <div class="input-consumers">→ Environment Stability, Rendering Defects</div>
+      </div>
+      <div class="input-card" onclick="openModal('${m.folder}/body_grid.png', 'Body-crop grid — 16 character body crops, 4×4')">
+        <div class="input-label">Body-crop grid · 4×4 character bodies</div>
+        <img src="${m.folder}/body_grid.png" alt="body grid" onerror="this.style.display='none'">
+        <div class="input-consumers">→ Body Consistency</div>
+      </div>
+      <div class="input-card" onclick="openModal('${m.folder}/face_grid.png', 'Face-crop grid — 16 tight face crops, 4×4')">
+        <div class="input-label">Face-crop grid · 4×4 tight face crops</div>
+        <img src="${m.folder}/face_grid.png" alt="face grid" onerror="this.style.display='none'">
+        <div class="input-consumers">→ Face & Uncanny Valley</div>
+      </div>
+      <div class="input-card" onclick="openModal('${m.folder}/speech_grid.png', 'Speech-timestamp face-crop grid')">
+        <div class="input-label">Speech grid · face crops at speech moments</div>
+        <img src="${m.folder}/speech_grid.png" alt="speech grid" onerror="this.style.display='none'">
+        <div class="input-consumers">→ Lip-Sync Correspondence</div>
+      </div>
+    </div>
+
+    <h2 class="section">Agent analyses</h2>
+  `;
+
+  // Map of which inputs each agent receives — matches agents.py::AGENTS registry.
+  const AGENT_INPUTS = {
+    body_consistency:            'full video + body-crop grid (4×4, 16 body bboxes)',
+    face_uncanny:                'full video + face-crop grid (4×4, 16 face bboxes)',
+    character_consistency_audit: 'full video + face-crop grid (strict judge rubric)',
+    motion_weight:               'full video only',
+    environment_stability:       'full video + keyframe grid (4×4, 16 full frames)',
+    rendering_defects:           'full video + keyframe grid (4×4, 16 full frames)',
+    audio_quality:               'full video only (Gemini hears audio natively)',
+    lipsync_correspondence:      'full video + speech-timestamp face-crop grid + segment captions',
+    speech_coherence:            'full video + Whisper transcript + per-segment timing',
+    prompt_fidelity:             'full video + Whisper transcript + original prompt',
+  };
+
+  (report.agents || []).forEach((r, i) => {
+    const inputs = AGENT_INPUTS[r.agent_id] || 'full video';
+    html += `
+      <div class="agent-card ${r.verdict}" id="agent-${i}">
+        <div class="head">
+          <div class="title">${escapeHtml(r.title)}</div>
+          <span class="badge ${r.verdict}">${r.verdict.replace('_', ' ')}</span>
+        </div>
+        <div class="inputs-badge">Inputs: ${inputs}</div>
+        <div class="summary">${escapeHtml(r.summary)}</div>
+        <span class="toggle" onclick="toggleAgent(${i})">Show details ↓</span>
+        <div class="findings">${escapeHtml(r.findings).replace(/\\n\\n/g, '<br><br>')}</div>
+      </div>
+    `;
+  });
+
+  if (report.transcript) {
+    html += `<h2 class="section">Transcript</h2>
+      <div class="transcript-box">${escapeHtml(report.transcript)}</div>`;
+  }
+  if (report.prompt) {
+    html += `<h2 class="section">Generation prompt</h2>
+      <div class="prompt-box">${escapeHtml(report.prompt)}</div>`;
+  }
+
+  document.getElementById('report-pane').innerHTML = html;
+}
+
+function toggleAgent(i) {
+  const card = document.getElementById('agent-' + i);
+  card.classList.toggle('expanded');
+  const t = card.querySelector('.toggle');
+  t.textContent = card.classList.contains('expanded') ? 'Hide details ↑' : 'Show details ↓';
+}
+
+function openModal(src, caption) {
+  document.getElementById('modal-img').src = src;
+  document.getElementById('modal-caption').textContent = caption || '';
+  document.getElementById('modal').classList.add('open');
+}
+function closeModal() {
+  document.getElementById('modal').classList.remove('open');
+}
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+
+function renderPromptReasoner(pr) {
+  if (!pr) return '';
+  const header = `
+    <div class="reasoner-card">
+      <div class="r-title">🔍 Prompt Reasoning Agent (Deduction Engine)</div>
+  `;
+  if (pr.skipped_reason) {
+    return header +
+      `<div class="reasoner-skipped">Skipped: ${escapeHtml(pr.skipped_reason)}</div></div>`;
+  }
+  let html = header;
+  if (pr.rationale) {
+    html += `<div class="r-rationale">${escapeHtml(pr.rationale)}</div>`;
+  }
+  const conflicts = pr.diagnosed_conflicts || [];
+  if (conflicts.length) {
+    html += `<div class="r-subhead">Diagnosed conflicts — intent vs outcome</div><ul>`;
+    conflicts.forEach(c => {
+      const cap = c.is_capacity_limited
+        ? `<span class="capacity">(capacity-limited — prompt fix won't help)</span>` : '';
+      html += `<li>
+        <strong>Intent:</strong> ${escapeHtml(c.intent || '')}<br>
+        <strong>Outcome:</strong> ${escapeHtml(c.outcome || '')}
+        <span class="mono">${escapeHtml(c.source_agent || '')}</span>${cap}
+      </li>`;
+    });
+    html += `</ul>`;
+  }
+  const triggers = pr.trigger_attributions || [];
+  if (triggers.length) {
+    html += `<div class="r-subhead">Trigger attributions — hidden semantic links</div><ul>`;
+    triggers.forEach(t => {
+      html += `<li>
+        <strong>Visible element:</strong> ${escapeHtml(t.visible_element || '')}
+        <span class="conf">· ${escapeHtml(t.confidence || '')}</span><br>
+        <strong>Prompt phrase:</strong> <span class="mono">${escapeHtml(t.prompt_phrase || '(implicit)')}</span><br>
+        <strong>Bias:</strong> ${escapeHtml(t.hypothesized_bias || '')}
+      </li>`;
+    });
+    html += `</ul>`;
+  }
+  const edits = pr.counterfactual_edits || [];
+  if (edits.length) {
+    html += `<div class="r-subhead">Counterfactual edits — trigger removal</div><ul>`;
+    edits.forEach(e => {
+      html += `<li>
+        <span class="op">${escapeHtml((e.operation || '').toUpperCase())}</span>
+        <span class="mono">${escapeHtml(e.from || '')}</span> →
+        <span class="mono">${escapeHtml(e.to || '')}</span><br>
+        <em style="color:#b5a5c8">${escapeHtml(e.reasoning || '')}</em>
+      </li>`;
+    });
+    html += `</ul>`;
+  }
+  if (pr.rewritten_prompt) {
+    html += `<div class="r-subhead">Rewritten prompt</div>
+      <div class="reasoner-rewritten">${escapeHtml(pr.rewritten_prompt)}</div>`;
+  }
+  html += `</div>`;
+  return html;
+}
+
+function escapeHtml(s) {
+  if (s == null) return '';
+  return String(s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/\n/g, '<br>');
+}
+
+init();
+</script>
+</body>
+</html>

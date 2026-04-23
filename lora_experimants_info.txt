@@ -148,10 +148,12 @@ EXP-2-10k: EXTENDED STANDARD (rank 32, 10000 steps, 960x544)
   W&B run: upgy4o0i
   Note: 10000 steps = ~24 epochs with 409 clips
 
-EXP-3: HIGH CAPACITY (rank 32, attention + FFN layers)
+EXP-3: HIGH CAPACITY (rank 32, 15000 steps, attention + FFN layers, 960x544)
   Config: packages/ltx-trainer/configs/skye_exp3_highcap.yaml
-  Status: RUNNING ON A DIFFERENT MACHINE (not 35.238.2.51) -- agent handles it
-  Benchmark results: NOT YET -- will be provided by the other machine's agent
+  Server (A100): outputs/skye_exp3_highcap/
+  Status: DONE + BENCHMARKED (updated 2026-04-20)
+  Benchmarked steps: 1000-15000 (every 1000, 15 checkpoints x 5 scenes)
+  Benchmark results: lora_results_FIX/benchmarks/skye_exp3_highcap/ -- DOWNLOADED LOCALLY
   Note: Adds ff.net.0.proj, ff.net.2, audio_ff.net.0.proj, audio_ff.net.2
   to target_modules. This captures more of Skye's motion style and audio.
 
@@ -168,27 +170,29 @@ EXP-4: I2V FOCUS (rank 32, 2500 steps, first_frame_conditioning_p=0.8)
 
 EXP-4-10k: I2V FOCUS EXTENDED (rank 32, 10000 steps, first_frame_conditioning_p=0.8)
   Config: packages/ltx-trainer/configs/skye_exp4_10k.yaml
-  Server: outputs/skye_exp4_10k/
-  Status: DONE -- trained, benchmarked
+  Server (A100): outputs/skye_exp4_10k/
+  Status: DONE training (2026-04-19) + benchmark RUNNING as of 2026-04-20
   Checkpoints: steps 500-10000 (every 500, 20 total) -- ALL SAVED
   Benchmarked steps: 1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000, 9000, 10000
-  Benchmark results: lora_results_FIX/benchmarks/skye_exp4_10k/
-  Note: Some results may not be fully synced locally -- run rsync to get all
+  Benchmark output (on A100): /home/efrattaig/LTX-2/lora_results_FIX/benchmarks/skye_exp4_10k/
+  NOT YET DOWNLOADED locally -- run rsync after benchmark finishes
 
 EXP-5: CLEAN HIGH-RES (rank 32, 15000 steps, 768x1024 portrait, attn+FFN, i2v=0.8)
   Config: packages/ltx-trainer/configs/skye_exp5_clean_highres.yaml
-  Server: outputs/skye_exp5_clean_highres/
-  Status: *** CURRENTLY TRAINING *** -- at step ~6000/15000 as of 2026-04-20
+  Server (A100): outputs/skye_exp5_clean_highres/
+  STATUS UNCERTAIN as of 2026-04-20: Previous session said "CURRENTLY TRAINING at
+    step ~6000/15000" but when checking A100 on 2026-04-20, ps aux showed only
+    skye_exp4_10k running and `ls outputs/` did NOT show skye_exp5_clean_highres/.
+    Either: (a) it ran and the dir has a different path, (b) it was planned but never
+    started, (c) it was superseded by the H100 highres experiments.
+    NEXT AGENT: verify with: ssh -i ~/.ssh/id_ed25519 efrattaig@35.238.2.51
+      "ls /home/efrattaig/LTX-2/outputs/ | grep exp5; find /home/efrattaig -name 'skye_exp5*' 2>/dev/null"
   Data: /home/efrattaig/data/golden_skye_preprocessed_768x1024_clean/ (104 clips)
-  Estimated completion: ~2026-04-21 morning (~9h remaining from time of writing)
-  Key differences from all other exps:
-    - Full portrait resolution (768x1024x97) instead of landscape (960x544)
-    - Clean dataset: 104 clips with frozen/stuck frames removed
-    - 15000 steps (longest run = ~36 epochs with 104 clips)
-    - Includes FFN layers in target_modules (like EXP-3)
-    - first_frame_conditioning_p=0.8 (like EXP-4)
-    - This is the "kitchen sink" experiment combining best settings from all exps
-  Benchmark: NOT YET -- run after training completes
+    (confirmed to exist on A100 — different from H100's portrait data which has 105 clips)
+  Key differences from other exps:
+    - Portrait 768x1024 + clean dataset + 15k steps + FFN + I2V 80%
+    - "Kitchen sink" experiment on A100 (but may have been replaced by H100 exps)
+  Benchmark: NOT YET (if experiment ran)
   W&B: project ltx-2-skye-lora, tags: exp5-clean-highres, portrait, 768x1024, clean-data
 
 
@@ -339,35 +343,61 @@ RULE: Never edit code on the server. Edit locally -> git commit -> git push -> g
 10. IMMEDIATELY PENDING TASKS
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-[ ] WAIT: EXP-5 training finishes (~2026-04-21 morning, ~9h remaining from 2026-04-20)
-    Monitor: ssh efrattaig@35.238.2.51 "ls outputs/skye_exp5_clean_highres/checkpoints/ | tail -3"
+UPDATED PENDING TASKS as of 2026-04-20:
 
-[ ] RUN: EXP-5 benchmark after training (on server, ~4-5h):
-    ssh efrattaig@35.238.2.51 "cd /home/efrattaig/LTX-2 && \
-      nohup /home/efrattaig/.local/bin/uv run python run_skye_benchmark.py \
-        --exp-dirs outputs/skye_exp5_clean_highres \
-        --output-dir /home/efrattaig/LTX-2/lora_results_FIX \
-        --steps 1000 2000 3000 4000 5000 6000 7000 8000 9000 10000 11000 12000 13000 14000 15000 \
-        > /tmp/ltx_current.log 2>&1 & disown \$! && echo launched"
+[DONE] EXP3-highcap: trained + benchmarked, results local
+[DONE] EXP4-10k: trained, benchmark running on A100
+[DONE] EXP4_highres: trained + benchmarked (H100, 600 videos), NOT YET downloaded
+[IN PROGRESS] EXP3_highres: training step ~8500/15000 on H100 (~5h left)
 
-[ ] SYNC: After EXP-5 benchmark:
-    rsync -av efrattaig@35.238.2.51:/home/efrattaig/LTX-2/lora_results_FIX/ \
-              /Users/efrattaig/projects/sm/LTX-2/lora_results_FIX/
+[ ] 1. MONITOR EXP3_highres training on H100:
+    ssh -i ~/.ssh/google_compute_engine efrat_t_smiti_ai@34.173.240.7 \
+      "tail -5 /tmp/ltx_train_exp3highres.log"
+    Also check step: grep 'Step [0-9]*/15000' /tmp/ltx_train_exp3highres.log | tail -3
 
-[ ] REBUILD: Update create_comparison.py ALL_EXPERIMENTS to include EXP-4-10k and EXP-5:
-    ("skye_exp2_10k",            10000, "EXP-2-10k\nrank32 10k"),
-    ("skye_exp4_i2v",             2500, "EXP-4\ni2v 2.5k"),
-    ("skye_exp4_10k",            10000, "EXP-4-10k\ni2v 10k"),
-    ("skye_exp5_clean_highres",  15000, "EXP-5\nclean 768x1024 15k"),
+[ ] 2. RUN EXP3_highres benchmark after training completes (on H100):
+    ssh -i ~/.ssh/google_compute_engine efrat_t_smiti_ai@34.173.240.7 \
+      "cd /home/efrat_t_smiti_ai/projects/LTX-2 && \
+       nohup uv run python run_skye_benchmark.py \
+         --exp-dirs outputs/skye_exp3_highres \
+         2>&1 | tee /tmp/ltx_benchmark_exp3highres.log &"
+
+[ ] 3. CONFIRM EXP4-10k benchmark finished on A100:
+    ssh -i ~/.ssh/id_ed25519 efrattaig@35.238.2.51 "tail -5 /tmp/ltx_current.log"
+
+[ ] 4. VERIFY EXP5 status on A100 (was reported as training but may not exist):
+    ssh -i ~/.ssh/id_ed25519 efrattaig@35.238.2.51 \
+      "ls /home/efrattaig/LTX-2/outputs/ | grep exp5; \
+       find /home/efrattaig -name 'skye_exp5*' -type d 2>/dev/null"
+
+[ ] 5. DOWNLOAD EXP4_highres benchmark from H100 (GCS relay, ~2GB):
+    ON H100: gsutil -m cp -r output/benchmarks/skye_exp4_highres/ gs://video_gen_dataset/benchmarks/
+    LOCALLY: gsutil -m cp -r gs://video_gen_dataset/benchmarks/skye_exp4_highres/ \
+               /Users/efrattaig/projects/sm/LTX-2/lora_results_FIX/benchmarks/
+
+[ ] 6. DOWNLOAD EXP4-10k benchmark from A100:
+    rsync -av -i ~/.ssh/id_ed25519 \
+      efrattaig@35.238.2.51:/home/efrattaig/LTX-2/lora_results_FIX/benchmarks/skye_exp4_10k/ \
+      /Users/efrattaig/projects/sm/LTX-2/lora_results_FIX/benchmarks/skye_exp4_10k/
+
+[ ] 7. DOWNLOAD EXP3_highres benchmark from H100 (after benchmark finishes):
+    Same GCS relay method as EXP4_highres.
+
+[ ] 8. REBUILD create_comparison.py to add all new exps:
+    ("skye_exp3_highcap", 15000, "EXP3-highcap\nFFN 960x544"),
+    ("skye_exp4_10k",     10000, "EXP4-10k\ni2v 960x544"),
+    ("skye_exp4_highres", 15000, "EXP4_highres\nI2V 768x1024"),
+    ("skye_exp3_highres", 15000, "EXP3_highres\nT2V 768x1024"),
     Then run: python3 create_comparison.py
 
-[ ] WAIT FOR EXP-3: From other machine. When results land in
-    lora_results_FIX/benchmarks/skye_exp3_highcap/, add to create_comparison.py:
-    ("skye_exp3_highcap", <final_step>, "EXP-3\n+FFN layers")
-    Then rebuild comparison.
+[ ] 9. ANALYSIS — primary question: does EXP4_highres (portrait + I2V + FFN) preserve
+    the collar tag? Check scenes: of_silly_goose, of_lifeguard (closest to neck).
+    Hypothesis ranking: EXP4_highres > EXP3_highres > EXP3_highcap > EXP4_10k
 
-[ ] DECISION: User watches lora_compar_1/ videos and picks best experiment.
-    Best LoRA used in production with run_skye_like_api.py --lora <path>.
+[ ] 10. DECISION: User picks best experiment. Use in production:
+    uv run python run_skye_like_api.py \
+      --lora outputs/skye_exp4_highres/checkpoints/lora_weights_step_XXXXX.safetensors \
+      --lora-strength 1.0 --durations 10 --seed 300
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -469,10 +499,186 @@ uv run python run_skye_like_api.py \
   --durations 10 \
   --seed 300
 
-# Run EXP-5 benchmark (after training completes ~2026-04-21)
-ssh efrattaig@35.238.2.51 "cd /home/efrattaig/LTX-2 && \
+# Run EXP-5 benchmark (if it exists — verify first, see section 10 pending tasks)
+ssh -i ~/.ssh/id_ed25519 efrattaig@35.238.2.51 "cd /home/efrattaig/LTX-2 && \
   nohup /home/efrattaig/.local/bin/uv run python run_skye_benchmark.py \
     --exp-dirs outputs/skye_exp5_clean_highres \
     --output-dir /home/efrattaig/LTX-2/lora_results_FIX \
     --steps 1000 2000 3000 4000 5000 6000 7000 8000 9000 10000 11000 12000 13000 14000 15000 \
     > /tmp/ltx_current.log 2>&1 & disown \$! && echo launched"
+
+# Check what's running on H100 (2x NVIDIA H100 80GB, primary highres machine)
+ssh -i ~/.ssh/google_compute_engine efrat_t_smiti_ai@34.173.240.7 \
+  "ps aux | grep python | grep -v grep | grep -v networkd"
+
+# Watch H100 training log
+ssh -i ~/.ssh/google_compute_engine efrat_t_smiti_ai@34.173.240.7 \
+  "tail -f /tmp/ltx_train_exp3highres.log"
+
+# Check H100 GPU utilization
+ssh -i ~/.ssh/google_compute_engine efrat_t_smiti_ai@34.173.240.7 \
+  "nvidia-smi --query-gpu=utilization.gpu,memory.used,memory.total --format=csv,noheader"
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+14. NEW GOAL: COLLAR TAG FIX (added 2026-04-20)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Skye has a small COLLAR TAG / PENDANT on her neck. Generated videos lose this
+detail — it disappears completely.
+
+ROOT CAUSE: LTX-2.3 VAE compresses 32x spatially. A 10-20px tag at 960x544
+= 0.3-0.6 latent tokens -> invisible to the model in the latent space.
+
+THREE-PRONGED FIX (implemented in EXP3_highres + EXP4_highres):
+  1. Portrait resolution 768x1024:
+     Tag goes from 0.3 to ~0.6-1.0 tokens — more representable
+  2. I2V conditioning (first_frame_conditioning_p=0.8 in EXP4_highres):
+     Reference start frame encodes the tag at full pixel resolution
+  3. FFN target modules (ff.net.0.proj, ff.net.2, audio_ff.*):
+     More model capacity for fine detail reconstruction
+
+WHY THIS MATTERS: The older experiments (EXP1-EXP4 at 960x544) were trained at
+landscape resolution, but the inference pipeline outputs 768x1024 portrait.
+Training at wrong aspect ratio + missing fine-detail capacity = tag loss.
+
+EXPECTED OUTCOME:
+  EXP4_highres (I2V + portrait + FFN): best chance of preserving tag
+    — The reference start frame literally shows the tag, conditioning on it
+  EXP3_highres (T2V + portrait + FFN): second best
+    — Portrait resolution helps, no direct reference frame conditioning
+  Older exps: tag likely still lost (fundamental resolution constraint)
+
+EVALUATION: Look at benchmark scenes of_silly_goose and of_lifeguard — these
+have the closest shots of Skye's neck area where the tag would be visible.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+15. H100 MACHINE & HIGHRES EXPERIMENTS (added 2026-04-20)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+A second machine (H100x2) was added to run the portrait resolution experiments.
+This machine is SEPARATE from the A100 at 35.238.2.51.
+
+H100 machine details:
+  IP:   34.173.240.7
+  User: efrat_t_smiti_ai  (different user than A100's efrattaig)
+  SSH:  ssh -i ~/.ssh/google_compute_engine efrat_t_smiti_ai@34.173.240.7
+  Repo: /home/efrat_t_smiti_ai/projects/LTX-2
+  Models: /home/efrat_t_smiti_ai/models/LTX-2.3/ltx-2.3-22b-dev.safetensors
+          /home/efrat_t_smiti_ai/models/gemma-3-12b-it-qat-q4_0-unquantized/
+  Training data (portrait): /home/efrat_t_smiti_ai/data/golden_skye_preprocessed_768x1024/
+    105 clips (111 raw, 6 too short — normal)
+  Benchmark inputs: /home/efrat_t_smiti_ai/projects/LTX-2/inputs/sky_bm/
+    All 10 scenes: bey.png, crsms.png, holoween.png, party.png, snow.png,
+    of_silly_goose.png, of_eagle.png, of_lifeguard.png, of_lift.png, of_everest.png
+  Benchmark outputs: /home/efrat_t_smiti_ai/projects/LTX-2/output/benchmarks/
+  GCS bucket for large transfers: gs://video_gen_dataset/
+
+EXP4_highres (768x1024, I2V 80%, Attn+FFN, 15k steps):
+  Config: packages/ltx-trainer/configs/skye_exp4_highres.yaml
+  Status: DONE training + DONE benchmark (2026-04-20)
+  Training: 2 H100 GPUs, DDP, 2.6s/step, both GPUs 100% at 65GB/80GB
+  Benchmark: 600 videos (30 checkpoints x 10 scenes x 2)
+             saved at output/benchmarks/skye_exp4_highres/ on H100
+             NOT YET DOWNLOADED to local Mac
+  W&B run: 4jocfrax
+  Checkpoint interval: 500 (step_500 to step_15000)
+
+EXP3_highres (768x1024, T2V/I2V 50%, Attn+FFN, 15k steps):
+  Config: packages/ltx-trainer/configs/skye_exp3_highres.yaml
+  Status: RUNNING as of 2026-04-20, step ~8500/15000
+  Started: ~2026-04-19 00:14 UTC (auto-started after EXP4_highres benchmark finished)
+  Log: /tmp/ltx_train_exp3highres.log on H100
+  W&B run: u0xdhfhv
+  Checkpoint interval: 500
+  ETA: ~5 more hours from time of writing (2026-04-20)
+  Benchmark: NOT YET — run after training
+
+Portrait data preprocessing (for reference):
+  uv run python packages/ltx-trainer/scripts/process_dataset.py \
+    --dataset-path /home/efrat_t_smiti_ai/data/golden_skye_train/dataset_h100.json \
+    --output-dir /home/efrat_t_smiti_ai/data/golden_skye_preprocessed_768x1024 \
+    --resolution-buckets "768x1024x49;768x1024x97" \
+    --model-path /home/efrat_t_smiti_ai/models/LTX-2.3/ltx-2.3-22b-dev.safetensors \
+    --text-encoder-path /home/efrat_t_smiti_ai/models/gemma-3-12b-it-qat-q4_0-unquantized \
+    --load-text-encoder-in-8bit
+
+Chaining: After EXP4_highres training finished, a chain script was used to
+auto-run benchmark then auto-start EXP3_highres training. Chain log: /tmp/chain_exp4highres.log
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+16. DDP 2-GPU TRAINING BUGS FIXED (added 2026-04-20)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Three bugs were found and fixed to enable 2-GPU DDP training on the H100.
+All fixed in the codebase (committed to main). EXP4_highres verified working.
+
+BUG 1 — DDP validation deadlock (trainer.py):
+  Symptom: rank 1 hangs indefinitely during validation step
+  Fix: accelerator.wait_for_everyone() barriers around rank-0-only validation;
+       unwrap DDP model before ValidationSampler
+  Root cause: DDP all-reduce hooks fire when only rank 0 calls forward -> deadlock
+
+BUG 2 — Gemma split across both GPUs (gemma_8bit.py):
+  Symptom: RuntimeError: tensors on cuda:1 vs cuda:0 during text encoder loading
+  Fix: device_map="auto"  ->  device_map={"": device_str}
+  Root cause: "auto" distributed 12B Gemma across both visible GPUs per rank.
+              Hidden states from different layers landed on different devices.
+
+BUG 3 — Embeddings processor on wrong device (trainer.py _setup_accelerator):
+  Symptom: RuntimeError cuda:1 and cuda:0 in embeddings_connector.py line 152
+  Fix: After Accelerator() init, add:
+         self._embeddings_processor.to(self._accelerator.device)
+  Root cause: _load_text_encoder_and_cache_embeddings() runs at __init__ line 84,
+              BEFORE _setup_accelerator() at line 86. torch.cuda.set_device(local_rank)
+              hasn't fired yet, so rank 1's embeddings_processor landed on cuda:0.
+
+Also: model_loader.py was fixed to pass device arg through to load_8bit_gemma().
+
+DDP config: packages/ltx-trainer/configs/accelerate/ddp_2gpu.yaml
+  distributed_type: MULTI_GPU
+  num_processes: 2
+  mixed_precision: bf16
+
+DDP training command (H100):
+  nohup uv run accelerate launch \
+    --config_file packages/ltx-trainer/configs/accelerate/ddp_2gpu.yaml \
+    packages/ltx-trainer/scripts/train.py \
+    packages/ltx-trainer/configs/<config>.yaml \
+    --disable-progress-bars \
+    2>&1 | tee /tmp/ltx_train_<name>.log &
+
+Performance: 2.55-2.87s/step at 768x1024x97, both GPUs 100%, 65GB/80GB VRAM each.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+17. DOWNLOAD COMMANDS FOR H100 RESULTS (added 2026-04-20)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Direct scp from H100 is too slow for large benchmark dirs (~2GB). Use GCS relay:
+
+Step 1 — upload from H100 to GCS (fast, ~1.2 GiB/s):
+  ssh -i ~/.ssh/google_compute_engine efrat_t_smiti_ai@34.173.240.7 \
+    "cd /home/efrat_t_smiti_ai/projects/LTX-2 && \
+     gsutil -m cp -r output/benchmarks/skye_exp4_highres/ gs://video_gen_dataset/benchmarks/ && \
+     gsutil -m cp -r output/benchmarks/skye_exp3_highres/ gs://video_gen_dataset/benchmarks/"
+
+Step 2 — download from GCS to local Mac:
+  gsutil -m cp -r gs://video_gen_dataset/benchmarks/skye_exp4_highres/ \
+    /Users/efrattaig/projects/sm/LTX-2/lora_results_FIX/benchmarks/
+  gsutil -m cp -r gs://video_gen_dataset/benchmarks/skye_exp3_highres/ \
+    /Users/efrattaig/projects/sm/LTX-2/lora_results_FIX/benchmarks/
+
+NOTE: gcloud auth expires periodically. If you get auth errors, user must run:
+  gcloud auth login  (on local Mac)
+
+For A100 results (smaller, rsync works):
+  rsync -av -i ~/.ssh/id_ed25519 \
+    efrattaig@35.238.2.51:/home/efrattaig/LTX-2/lora_results_FIX/ \
+    /Users/efrattaig/projects/sm/LTX-2/lora_results_FIX/
+
+================================================================================
+END OF LOG — last updated 2026-04-20
+================================================================================

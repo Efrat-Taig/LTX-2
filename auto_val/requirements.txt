@@ -1,0 +1,40 @@
+# ============================================================
+# AI Video QA Pipeline — Requirements
+# ============================================================
+
+# --- Core framework ---
+fastapi>=0.111.0
+uvicorn[standard]>=0.29.0
+pydantic>=2.7.0
+loguru>=0.7.2
+
+# --- Video & image processing ---
+opencv-python>=4.9.0
+numpy>=1.26.0
+Pillow>=10.3.0
+
+# --- Audio processing ---
+soundfile>=0.12.1
+librosa>=0.10.2          # Agent 13 SFX & Foley
+
+# --- Quality metrics (Agent 14) ---
+scikit-image>=0.23.0     # SSIM — optional, gracefully absent
+# piq>=0.8.0             # BRISQUE / VMAF — uncomment when needed
+
+# --- AI / ML models (integration-ready stubs — uncomment per agent) ---
+# mediapipe>=0.10.14     # Agents 01–04, 07 (Division 1 + 2)
+# openai-whisper>=20231117  # Agents 11, 12
+# torch>=2.3.0           # Required by most deep-learning models
+# torchvision>=0.18.0
+
+# --- LLM synthesis (Agent 18 LLM path — optional) ---
+anthropic>=0.27.0
+openai>=1.30.0
+
+# --- API utilities ---
+python-multipart>=0.0.9  # FastAPI file upload support
+httpx>=0.27.0
+
+# --- FFmpeg (system binary required for audio extraction) ---
+# Install with: brew install ffmpeg  OR  apt install ffmpeg
+ffmpeg-python>=0.2.0     # Python bindings (used for format normalisation)

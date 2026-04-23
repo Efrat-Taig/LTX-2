@@ -38,7 +38,7 @@ def chase(name: str, file: str) -> dict:
         "name": f"chase_{name}",
         "display": f"Chase — {name}",
         "baseline": CHASE_BASE / file,
-        "variants": ["t1_prompt", "t2_stg0.5", "t2_stg1.0", "t2_stg2.0"],
+        "variants": ["baseline_notext", "t1_prompt", "t2_stg0.5", "t2_stg1.0", "t2_stg2.0"],
         "exp_key": f"chase_{name}",
     }
 
