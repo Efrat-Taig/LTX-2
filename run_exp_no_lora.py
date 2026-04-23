@@ -47,6 +47,7 @@ GEMMA_ROOT        = Path.home() / "models" / "gemma-3-12b-it-qat-q4_0-unquantize
 
 CHASE_IMAGES = SCRIPT_DIR / "inputs" / "chase_bm"
 SKYE_IMAGES  = SCRIPT_DIR / "inputs" / "sky_bm"
+HELI_IMAGES  = SCRIPT_DIR / "inputs" / "BM_v1" / "benchmark_v1" / "skye_helicopter_birthday_gili"
 
 OUT_ROOT = SCRIPT_DIR / "lora_results" / "exp_no_lora"
 
@@ -113,6 +114,16 @@ SKYE_NEG_BASE = (
 )
 SKYE_NEG = SKYE_NEG_BASE + _EXTRA_NEG
 
+# Helicopter scene has its own negative prompt (from its config.json)
+HELI_NEG_BASE = (
+    "low quality, bad anatomy, deformed bodies, distorted faces, scary expressions, "
+    "extra limbs, impossible positions, glitch, artifacts, darkness, grim atmosphere, "
+    "static rotor blades, frozen helicopter rotors, out of focus face, characters merged, "
+    "melting, bad composition, overly stylized, outdated cartoon style, wrong vehicle, "
+    "cockpit closed incorrectly"
+)
+HELI_NEG = HELI_NEG_BASE + _EXTRA_NEG
+
 # ── Stability suffix added to every positive prompt ───────────────────────────
 
 _STABLE = (
@@ -131,6 +142,14 @@ _SKYE_SPEECH = (
     " Speaking warmly and directly to camera, mouth moving clearly with the words: "
     "\"Hi Gili — I heard it's your birthday, so I came to wish you a happy birthday!\" "
     "Warm smile, expressive eyes, animated face."
+)
+
+_HELI_SPEECH = (
+    " She speaks in an enthusiastic, high-pitched voice over muffled engine noise, "
+    "mouth moving clearly with the words: "
+    "\"Hi Gili! Look where I am! I flew all the way over the coast to tell you — "
+    "Congratulations! I'm so excited for you! Happy Birthday, Gili!\" "
+    "Warm smile, expressive eyes, waving her paw with joyful energy."
 )
 
 # ── Scene definitions ──────────────────────────────────────────────────────────
@@ -285,13 +304,33 @@ SKYE_SCENES = [
             + _STABLE + _SKYE_SPEECH
         ),
     },
+    {
+        "name": "helicopter",
+        "char": "skye",
+        "image": HELI_IMAGES / "start_frame.png",
+        # Config dims 698x1280 rounded up to nearest multiple of 32 for pipeline safety
+        "w": 704, "h": 1280,
+        "fps": 24.0,
+        "image_strength": 0.9,
+        "neg": HELI_NEG,
+        "prompt": (
+            "High-quality 3D CGI children's cartoon style, vibrant colors, clean CGI, "
+            "cinematic lighting, smooth character animation, preschool-friendly aesthetic, "
+            "4k render, detailed textures, expressive facial expressions. "
+            "A small pink pup in pink flight gear sits in the cockpit of a pink cartoon "
+            "helicopter hovering at the viewer's eye level. The main rotor and tail rotor "
+            "spin at high speed with realistic motion blur. Below, a sunny coastline and "
+            "harbor town spread out with a tall tower on a green hill; clouds drift gently."
+            + _STABLE + _HELI_SPEECH
+        ),
+    },
 ]
 
 # Scenes used in Track 2 STG sweep (Chase visual quality focus)
 CHASE_STG_SCENES = [s for s in CHASE_SCENES if s["name"] in ("normal", "halloween")]
 
 # Scenes used in Track 3 audio CFG sweep (Skye script fidelity focus)
-SKYE_CFG_SCENES = [s for s in SKYE_SCENES if s["name"] in ("bey", "crsms", "snow")]
+SKYE_CFG_SCENES = [s for s in SKYE_SCENES if s["name"] in ("bey", "crsms", "snow", "helicopter")]
 
 # ── Experiment variants ────────────────────────────────────────────────────────
 
@@ -354,9 +393,13 @@ def generate(pipeline, *, scene: dict, variant: dict, output_path: Path) -> None
     from ltx_pipelines.utils.args import ImageConditioningInput
     from ltx_pipelines.utils.media_io import encode_video
 
-    neg = CHASE_NEG if scene["char"] == "chase" else SKYE_NEG
+    neg = scene.get("neg")
+    if neg is None:
+        neg = CHASE_NEG if scene["char"] == "chase" else SKYE_NEG
 
-    num_frames     = frames_for_duration(DURATION_S, FPS)
+    fps            = scene.get("fps", FPS)
+    image_strength = scene.get("image_strength", 1.0)
+    num_frames     = frames_for_duration(DURATION_S, fps)
     tiling_config  = TilingConfig.default()
     video_chunks   = get_video_chunks_number(num_frames, tiling_config)
 
@@ -384,11 +427,11 @@ def generate(pipeline, *, scene: dict, variant: dict, output_path: Path) -> None
         height=scene["h"],
         width=scene["w"],
         num_frames=num_frames,
-        frame_rate=FPS,
+        frame_rate=fps,
         num_inference_steps=STEPS,
         video_guider_params=video_guider,
         audio_guider_params=audio_guider,
-        images=[ImageConditioningInput(path=str(scene["image"]), frame_idx=0, strength=1.0)],
+        images=[ImageConditioningInput(path=str(scene["image"]), frame_idx=0, strength=image_strength)],
         tiling_config=tiling_config,
         enhance_prompt=False,
     )
@@ -396,7 +439,7 @@ def generate(pipeline, *, scene: dict, variant: dict, output_path: Path) -> None
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with torch.inference_mode():
         encode_video(
-            video=video, fps=int(FPS), audio=audio,
+            video=video, fps=int(fps), audio=audio,
             output_path=str(output_path),
             video_chunks_number=video_chunks,
         )
