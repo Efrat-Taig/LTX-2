@@ -326,8 +326,9 @@ SKYE_SCENES = [
     },
 ]
 
-# Scenes used in Track 2 STG sweep (Chase visual quality focus)
-CHASE_STG_SCENES = [s for s in CHASE_SCENES if s["name"] in ("normal", "halloween")]
+# Scenes used in Track 2 STG sweep (visual quality focus) — all benchmark scenes
+CHASE_STG_SCENES = list(CHASE_SCENES)
+SKYE_STG_SCENES  = list(SKYE_SCENES)
 
 # Scenes used in Track 3 audio CFG sweep (Skye script fidelity focus)
 SKYE_CFG_SCENES = [s for s in SKYE_SCENES if s["name"] in ("bey", "crsms", "snow", "helicopter")]
@@ -471,8 +472,8 @@ def main() -> int:
 
     if 2 in args.tracks:
         for variant in TRACK2_VARIANTS:
-            for scene in CHASE_STG_SCENES:
-                p = out_path(variant["label"], f"chase_{scene['name']}")
+            for scene in CHASE_STG_SCENES + SKYE_STG_SCENES:
+                p = out_path(variant["label"], f"{scene['char']}_{scene['name']}")
                 if not p.exists():
                     work.append((scene, variant, p))
 
