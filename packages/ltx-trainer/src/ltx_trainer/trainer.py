@@ -38,6 +38,7 @@ from ltx_trainer.model_loader import load_embeddings_processor, load_text_encode
 from ltx_trainer.model_loader import load_model as load_ltx_model
 from ltx_trainer.progress import TrainingProgress
 from ltx_trainer.quantization import quantize_model
+from ltx_trainer.sigma_tracker import SigmaBucketTracker
 from ltx_trainer.timestep_samplers import SAMPLERS
 from ltx_trainer.training_strategies import get_training_strategy
 from ltx_trainer.utils import open_image_as_srgb, save_image
@@ -90,6 +91,8 @@ class LtxvTrainer:
         self._dataset = None
         self._global_step = -1
         self._checkpoint_paths = []
+        self._sigma_tracker = SigmaBucketTracker()
+        self._last_step_sigmas: list[float] = []
         self._init_wandb()
 
     def train(  # noqa: PLR0912, PLR0915
@@ -236,13 +239,20 @@ class LtxvTrainer:
 
                     # Log metrics to W&B (only on main process and optimization steps)
                     if IS_MAIN_PROCESS and is_optimization_step:
-                        self._log_metrics(
-                            {
-                                "train/loss": loss.item(),
-                                "train/learning_rate": current_lr,
-                                "train/step_time": step_time,
-                            }
+                        step_loss = loss.item()
+                        # Sigma-bucketed loss tracking. For batch_size=1 the scalar
+                        # loss equals the per-element loss, so we broadcast it.
+                        self._sigma_tracker.update(
+                            self._last_step_sigmas,
+                            [step_loss] * len(self._last_step_sigmas),
                         )
+                        metrics = {
+                            "train/loss": step_loss,
+                            "train/learning_rate": current_lr,
+                            "train/step_time": step_time,
+                        }
+                        metrics.update(self._sigma_tracker.get_metrics())
+                        self._log_metrics(metrics)
 
                     # Fallback logging when progress bars are disabled
                     if disable_progress_bars and IS_MAIN_PROCESS and self._global_step % 20 == 0:
@@ -347,6 +357,11 @@ class LtxvTrainer:
 
         # Use strategy to compute loss
         loss = self._training_strategy.compute_loss(video_pred, audio_pred, model_inputs)
+
+        # Capture per-batch sigma for sigma-bucket tracking. With batch_size=1
+        # (the only configuration we run) the scalar loss equals the per-element loss,
+        # so we broadcast it across all sigmas for SigmaBucketTracker.update().
+        self._last_step_sigmas = model_inputs.video.sigma.detach().cpu().reshape(-1).tolist()
 
         return loss
 
