@@ -53,15 +53,15 @@ Visual character anchors (use these EXACT names — never generic terms like "th
 
 Describe what happens in this clip using EXACTLY this template:
 
-[paw_patrol] <characters visible, by name>. <concrete action verbs — what each character is physically doing: running, jumping, flying, sliding, talking, sitting, looking, gesturing, etc.>. <setting / location>. <camera: wide shot / close-up / low-angle / action shot / etc.>.
+[paw_patrol] <characters visible, by name>. <concrete action verbs — what each character is physically doing: running, jumping, flying, sliding, talking, sitting, looking, gesturing, etc.>. <setting / location>. <camera: wide shot / close-up / low-angle / action shot / etc.>. <dialogue, if any — see rule 5>.
 
 Strict rules:
 1. ALWAYS begin with the literal token "[paw_patrol]"
 2. ALWAYS use character names; never "the pup", "the team", or "they"
 3. Describe SPECIFIC physical actions with concrete verbs (not "is in the scene")
 4. If Ryder is visible, explicitly note that he stands UPRIGHT on two legs
-5. If a character is talking, say "<name> talks" — do NOT transcribe dialogue
-6. 1-2 sentences total, under 60 words
+5. If a character speaks, INCLUDE the dialogue verbatim in double quotes, attributed by name. Format: <Name> says, "<exact words heard>". You can hear the audio — transcribe what is actually said. If the speaker is off-screen, say <off-screen voice> says, "...". If multiple characters speak, include each. Skip if there's no clear dialogue (only sound effects, music, or barking).
+6. 2-3 sentences total, under 80 words
 7. Be factual — no "amazing", "exciting", "adorable", etc.
 
 Output ONLY the single caption — no commentary, no preamble, no bullet points."""
