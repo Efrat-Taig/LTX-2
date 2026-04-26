@@ -87,11 +87,27 @@ def discover_scenes(bm_root: Path) -> list[dict]:
             continue
         global_prompt = cfg.get("global_prompt", "")
         full_prompt = (global_prompt + "\n\n" + prompts[0]).strip() if global_prompt else prompts[0]
+
+        # Honor per-scene duration + dimensions if specified, with defaults otherwise.
+        # Frame count must satisfy frames % 8 == 1 (LTX-2 latent constraint).
+        fps = float(cfg.get("fps", BM_FPS))
+        duration = float(cfg.get("duration", BM_FRAMES / BM_FPS))
+        raw_frames = max(1, round(duration * fps))
+        num_frames = ((raw_frames - 1) // 8) * 8 + 1
+        # Round dimensions down to multiples of 32 (LTX-2 spatial constraint).
+        dims = cfg.get("dimensions", {})
+        width  = (int(dims.get("width",  BM_WIDTH))  // 32) * 32
+        height = (int(dims.get("height", BM_HEIGHT)) // 32) * 32
+
         scenes.append({
             "name": scene_dir.name,
             "prompt": full_prompt,
             "image": start_frame,
             "negative_prompt": cfg.get("negative_prompt", NEGATIVE_PROMPT),
+            "width": width,
+            "height": height,
+            "num_frames": num_frames,
+            "fps": fps,
         })
     return scenes
 
@@ -294,10 +310,10 @@ def generate_one(
     gen_config = GenerationConfig(
         prompt=scene["prompt"],
         negative_prompt=scene.get("negative_prompt", NEGATIVE_PROMPT),
-        height=BM_HEIGHT,
-        width=BM_WIDTH,
-        num_frames=BM_FRAMES,
-        frame_rate=BM_FPS,
+        height=scene.get("height", BM_HEIGHT),
+        width=scene.get("width", BM_WIDTH),
+        num_frames=scene.get("num_frames", BM_FRAMES),
+        frame_rate=scene.get("fps", BM_FPS),
         num_inference_steps=BM_STEPS,
         guidance_scale=BM_CFG,
         seed=BM_SEED,
