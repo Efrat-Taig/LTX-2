@@ -146,8 +146,10 @@ def _load_lora_config_from_exp(exp_dir: Path):
                             "audio_ff.net.0.proj", "audio_ff.net.2"],
         )
     import yaml
+    # The trainer's saved training_config.yaml contains `!!python/tuple` tags (e.g. video_dims),
+    # which yaml.safe_load rejects. Use unsafe_load — file is trainer-generated, not user input.
     with open(training_cfg_path) as f:
-        cfg = yaml.safe_load(f)
+        cfg = yaml.unsafe_load(f)
     lora_cfg = cfg.get("lora", {})
     return LoraConfig(
         r=lora_cfg.get("rank", 32),
