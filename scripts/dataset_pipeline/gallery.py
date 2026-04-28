@@ -14,10 +14,11 @@ import textwrap
 from pathlib import Path
 
 GALLERY_W = 960
-GALLERY_VIDEO_H = 544          # video area height
+GALLERY_VIDEO_H = 544          # video area height — must match trainer target H
 BOTTOM_BAR_H = 240             # black band beneath the video for the caption
 GALLERY_H = GALLERY_VIDEO_H + BOTTOM_BAR_H   # final canvas: 960x784
 GALLERY_FPS = 24
+GALLERY_FRAMES_PER_CLIP = 49   # mirrors trainer --resolution-buckets WxHxF
 INTERCLIP_BLACK_S = 0.5
 # Caption layout (inside the 240px black band)
 PROMPT_WRAP_COLS = 78
@@ -29,6 +30,8 @@ AUDIO_CODEC = "aac"
 AUDIO_RATE = 44100
 AUDIO_CH = 2
 AUDIO_BR = "96k"
+# How long the trimmed clip plays in the gallery, given target FPS + frame count.
+GALLERY_CLIP_DURATION_S = GALLERY_FRAMES_PER_CLIP / GALLERY_FPS  # 49/24 ≈ 2.04s
 
 
 def _find_font() -> str:
@@ -85,12 +88,15 @@ def _ensure_black_filler(work_dir: Path) -> Path:
 
 
 def render_per_clip(src_mp4: Path, prompt_text: str, idx: int, out_mp4: Path) -> None:
-    """Render one gallery clip:
-      - Top 960×544: video scaled+padded.
+    """Render one gallery clip showing what the trainer sees:
+      - Video region 960×544: BICUBIC scale-to-fill + center-crop, then trimmed
+        to GALLERY_FRAMES_PER_CLIP frames at GALLERY_FPS. This mirrors
+        process_videos.py:_resize_and_crop (reshape_mode='center') + the
+        49-frame slice in compute_latents (`frames_resized[:N]`).
       - Bottom 240px: solid black band carrying the wrapped caption.
       - Index '#NNNN' burned top-left of the video region.
-      - Source audio preserved (re-encoded to AAC for concat compatibility).
-    Final canvas = 960×784.
+      - Source audio preserved (also trimmed to clip duration).
+    Final canvas = 960×784. Clip plays for ~2.04s (49/24 fps).
     """
     out_mp4.parent.mkdir(parents=True, exist_ok=True)
     wrapped = _wrap_caption(prompt_text)
@@ -101,15 +107,17 @@ def render_per_clip(src_mp4: Path, prompt_text: str, idx: int, out_mp4: Path) ->
     font_arg = f":fontfile='{font}'" if font else ""
 
     label_esc = _drawtext_escape(f"#{idx:04d}")
-
-    # Caption sits inside the bottom band: y starts at GALLERY_VIDEO_H + 16 (16px top padding).
     caption_y = GALLERY_VIDEO_H + 16
+    duration = f"{GALLERY_CLIP_DURATION_S:.4f}"
 
     vf = (
-        # 1. fit video into 960×544 with letterbox
-        f"scale={GALLERY_W}:{GALLERY_VIDEO_H}:force_original_aspect_ratio=decrease,"
-        f"pad={GALLERY_W}:{GALLERY_VIDEO_H}:(ow-iw)/2:(oh-ih)/2:black,"
-        # 2. extend canvas downward — content stays at top, bottom 240px is black
+        # 1. trainer-equivalent: scale-to-fill (preserve aspect), then center-crop.
+        #    `force_original_aspect_ratio=increase` matches the trainer's
+        #    "scale so the smaller dim fits, then crop the excess".
+        f"scale={GALLERY_W}:{GALLERY_VIDEO_H}:force_original_aspect_ratio=increase:flags=bicubic,"
+        f"crop={GALLERY_W}:{GALLERY_VIDEO_H},"
+        f"setsar=1,"
+        # 2. extend canvas downward — bottom 240px is the caption band
         f"pad={GALLERY_W}:{GALLERY_H}:0:0:black,"
         # 3. index label inside the video region
         f"drawtext=text='{label_esc}':x=24:y=24:"
@@ -123,8 +131,11 @@ def render_per_clip(src_mp4: Path, prompt_text: str, idx: int, out_mp4: Path) ->
     cmd = [
         "ffmpeg", "-y", "-loglevel", "error",
         "-i", str(src_mp4),
+        # Match trainer: take exactly GALLERY_FRAMES_PER_CLIP frames at target fps.
         "-vf", vf,
         "-r", str(GALLERY_FPS),
+        "-frames:v", str(GALLERY_FRAMES_PER_CLIP),
+        "-t", duration,
         "-c:v", "libx264", "-preset", "fast", "-crf", "20", "-pix_fmt", "yuv420p",
         "-c:a", AUDIO_CODEC, "-ar", str(AUDIO_RATE), "-ac", str(AUDIO_CH), "-b:a", AUDIO_BR,
         str(out_mp4),

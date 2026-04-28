@@ -41,7 +41,6 @@ import pyarrow.parquet as pq
 
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "scripts" / "dataset_pipeline"))
-from captions import apply_brand_tokens  # noqa: E402
 
 GCS_TARGET_ROOT = "gs://video_gen_dataset/TinyStories/training_data"
 LOCAL_PARQUET_CACHE = Path("/tmp/manifests")  # already populated locally
@@ -138,8 +137,10 @@ def build_skye(out_root: Path, limit: int) -> list[POCClip]:
             print(f"  [{i}] NO_AUG_MATCH key={key}", flush=True)
             continue
         url = aug_matches[0]["output_video_path"]
-        caption_raw = row.get("scene_caption") or ""
-        caption = apply_brand_tokens(caption_raw)
+        # Persist the raw caption (with the original character name). Brand-
+        # token substitution is applied just-in-time at gallery render and at
+        # trainer-CSV emit. See scripts/dataset_pipeline/brand_tokens.yaml.
+        caption = row.get("scene_caption") or ""
 
         clip = POCClip(
             index=i,
@@ -182,12 +183,12 @@ def build_chase(out_root: Path, limit: int) -> list[POCClip]:
         data = entry.get("data", {})
         meta = data.get("meta", {}) or {}
         url = data.get("video", "") or ""
-        caption_raw = cap_by_url.get(url, "")
-        if not caption_raw:
+        caption = cap_by_url.get(url, "")
+        if not caption:
             clips.append(POCClip(index=i, source_url=url, note="no caption found"))
             print(f"  [{i}] NO_CAPTION  url={url}", flush=True)
             continue
-        caption = apply_brand_tokens(caption_raw)
+        # Caption stays raw ("Chase ..."); substitution is just-in-time.
 
         scene_fn = meta.get("scene_filename") or ""
         clip = POCClip(
@@ -246,15 +247,23 @@ def write_metadata(out_root: Path, character: str, version: int, source_label: s
     }
     (out_root / "metadata.json").write_text(json.dumps(md, indent=2, ensure_ascii=False))
 
-    # all.csv (active only)
-    csv = out_root / "prompts" / "all.csv"
-    csv.parent.mkdir(parents=True, exist_ok=True)
+    # dataset.csv — single rich CSV. Doubles as trainer input (LTX-2's
+    # process_dataset.py reads `caption` + `video_path` columns) and the
+    # human-readable bulk review. Other columns are inert to the trainer
+    # but kept for traceability.
+    csv = out_root / "dataset.csv"
     with csv.open("w") as f:
-        f.write("index,prompt\n")
+        f.write("index,caption,video_path,speaker,duration_s,width,height,fps,source_episode,source_url,video_md5\n")
         for c in clips:
-            if c.download_ok and c.prompt:
-                p = c.prompt.replace('"', '""').replace("\n", " ").strip()
-                f.write(f'{c.index},"{p}"\n')
+            if not (c.download_ok and c.prompt):
+                continue
+            cap = c.prompt.replace('"', '""').replace("\n", " ").strip()
+            ep = (c.source_episode or "").replace('"', '""')
+            url = (c.source_url or "").replace('"', '""')
+            f.write(
+                f'{c.index},"{cap}","{c.video}","{c.speaker}",{c.duration_s:.3f},'
+                f'{c.width},{c.height},{c.fps:.3f},"{ep}","{url}",{c.video_md5}\n'
+            )
 
 
 def upload_to_gcs(local_root: Path, gcs_dst: str) -> None:
@@ -290,7 +299,6 @@ def main() -> int:
     for character, version, dataset_dir, source_label in targets:
         out_root = Path(args.local_out) / dataset_dir
         (out_root / "videos").mkdir(parents=True, exist_ok=True)
-        (out_root / "prompts").mkdir(parents=True, exist_ok=True)  # only for all.csv
         print(f"\n=== POC build: {dataset_dir} (limit={args.limit}) ===", flush=True)
         if character == "skye":
             clips = build_skye(out_root, args.limit)

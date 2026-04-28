@@ -1,0 +1,17 @@
+# Brand-token substitution map.
+# Applied JUST-IN-TIME when (a) rendering the QA gallery, (b) emitting the
+# trainer-input CSV. Persistent dataset artifacts (metadata.json, the
+# qa_gallery's *underlying* clips, latents) are NOT rewritten — only the
+# in-flight prompt strings are.
+#
+# To change a token, edit this file and re-run the gallery render +
+# trainer encoding. The dataset itself does not need to be rebuilt.
+#
+# Matching is whole-word, case-insensitive.
+
+substitutions:
+  Chase: CHASE_PP
+  Skye:  SKYE_PP
+  # Add more characters here as their LoRAs come online:
+  # Marshall: MARSHALL_PP
+  # Rubble:   RUBBLE_PP

@@ -29,6 +29,24 @@ BRAND_TOKEN_MAP = {
     "skye":  "SKYE_PP",
 }
 
+_BRAND_TOKENS_YAML = Path(__file__).resolve().parent / "brand_tokens.yaml"
+
+
+def load_brand_tokens(config_path: Path | None = None) -> dict[str, str]:
+    """Load the brand-token substitution map from YAML. Falls back to the
+    BRAND_TOKEN_MAP module-level default if the file is missing or unreadable.
+    Keys are normalized to lowercase. Values are returned as-is.
+    """
+    path = config_path or _BRAND_TOKENS_YAML
+    try:
+        import yaml
+        with path.open() as f:
+            cfg = yaml.safe_load(f) or {}
+        subs = (cfg.get("substitutions") or {})
+        return {str(k).lower(): str(v) for k, v in subs.items()}
+    except Exception:  # noqa: BLE001
+        return {k.lower(): v for k, v in BRAND_TOKEN_MAP.items()}
+
 
 @dataclass
 class CaptionEntry:
@@ -107,13 +125,14 @@ def _word_boundary_replace(text: str, needle: str, repl: str) -> str:
     return pattern.sub(repl, text)
 
 
-def apply_brand_tokens(caption: str, characters: list[str] | None = None) -> str:
-    """Substitute `Chase`/`Skye` (etc.) → `CHASE_PP`/`SKYE_PP` everywhere
-    they appear as whole words. Order matters: longer names first to avoid
-    clobbering compound substrings (none currently, but defensive)."""
-    chars = characters or list(BRAND_TOKEN_MAP.keys())
-    chars = sorted(chars, key=len, reverse=True)
+def apply_brand_tokens(caption: str, mapping: dict[str, str] | None = None) -> str:
+    """Substitute character names → brand tokens (whole-word, case-insensitive).
+    `mapping` is {raw_name: token}. If None, loads from brand_tokens.yaml.
+    Longer names are processed first to avoid clobbering compound substrings."""
+    m = mapping if mapping is not None else load_brand_tokens()
+    if not m:
+        return caption
     out = caption
-    for c in chars:
-        out = _word_boundary_replace(out, c, BRAND_TOKEN_MAP[c])
+    for raw in sorted(m.keys(), key=len, reverse=True):
+        out = _word_boundary_replace(out, raw, m[raw])
     return out

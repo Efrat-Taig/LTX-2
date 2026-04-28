@@ -18,6 +18,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "scripts" / "dataset_pipeline"))
 
+from captions import apply_brand_tokens, load_brand_tokens
 from gallery import (
     build_concat_list,
     check_ffmpeg,
@@ -48,7 +49,9 @@ def main() -> int:
     rendered = 0
     skipped = 0
     failed = 0
+    token_map = load_brand_tokens()
     print(f"=== Rendering gallery for {root.name} ({len(clips)} clips) ===", flush=True)
+    print(f"    brand-token substitutions (just-in-time): {token_map}", flush=True)
     for c in clips:
         if not c.get("download_ok", True) or not c.get("prompt"):
             skipped += 1
@@ -64,7 +67,10 @@ def main() -> int:
             failed += 1
             continue
         try:
-            render_per_clip(src, c["prompt"], idx, dst)
+            # Substitute character names → brand tokens at render time only;
+            # metadata.json's `prompt` stays raw.
+            display_prompt = apply_brand_tokens(c["prompt"], token_map)
+            render_per_clip(src, display_prompt, idx, dst)
             print(f"  [{idx:04d}] rendered", flush=True)
             rendered += 1
         except Exception as e:  # noqa: BLE001
