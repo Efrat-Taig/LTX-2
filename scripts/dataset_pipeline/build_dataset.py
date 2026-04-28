@@ -163,13 +163,14 @@ def build(args: argparse.Namespace) -> int:
         meta = data.get("meta", {})
         url = data.get("video", "")
         speaker = meta.get("speaker", "")
+        scene_fn = meta.get("scene_filename") or ""
         clip = Clip(
             index=idx,
-            source_url=url,
-            source_episode=meta.get("scene_filename", "").rsplit("-Scene-", 1)[0],
-            source_season=int(meta.get("season_number", 0) or 0),
-            source_scene_number=float(meta.get("scene_number", 0) or 0),
-            speaker=speaker,
+            source_url=url or "",
+            source_episode=scene_fn.rsplit("-Scene-", 1)[0] if scene_fn else "",
+            source_season=int(meta.get("season_number") or 0),
+            source_scene_number=float(meta.get("scene_number") or 0),
+            speaker=speaker or "",
             video=f"videos/{idx:04d}.mp4",
             prompt_path=f"prompts/{idx:04d}.txt",
         )
