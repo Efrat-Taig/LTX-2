@@ -259,29 +259,39 @@ def gcs_b64_md5_to_hex(b64: str) -> str:
         return ""
 
 
-def scan_gcs(uri: str, cov: CoverageEntry) -> Iterator[Row]:
-    """uri is gs://bucket/ or gs://bucket/prefix/. Streams object metadata via
-    `gcloud storage objects list --recursive --format=value(...)` so memory
-    stays bounded regardless of bucket size."""
-    if not uri.startswith("gs://"):
-        cov.notes.append(f"skipping non-gs uri: {uri}")
-        return
-    rest = uri[len("gs://"):]
-    bucket = rest.split("/", 1)[0]
-    prefix = rest[len(bucket) + 1:] if "/" in rest else ""
-    pattern = f"gs://{bucket}/{prefix}**" if prefix else f"gs://{bucket}/**"
+def _gcs_list_top_prefixes(uri: str) -> list[str]:
+    """Non-recursive list of immediate children under uri (subdirs + objects).
+    Used to subdivide a big bucket into smaller per-prefix listings so that no
+    single `gcloud storage objects list` call has to stream a million objects
+    (which we've observed stalls in practice)."""
+    proc = subprocess.run(
+        ["gcloud", "storage", "ls", uri, "--verbosity=error"],
+        capture_output=True, text=True, check=False, timeout=120,
+    )
+    if proc.returncode != 0:
+        return []
+    out = []
+    for line in proc.stdout.splitlines():
+        line = line.strip()
+        if not line or line == uri or line.endswith("/:") or not line.startswith("gs://"):
+            continue
+        out.append(line)
+    return out
+
+
+def _scan_gcs_chunk(pattern: str, bucket: str, cov: CoverageEntry, pbar: tqdm) -> Iterator[Row]:
+    """Stream one `gcloud storage objects list <pattern>` invocation. stderr
+    is drained to a tempfile to avoid the pipe-buffer deadlock that silently
+    truncated earlier runs."""
+    import tempfile
 
     cmd = [
         "gcloud", "storage", "objects", "list", pattern,
+        "--verbosity=error",
         "--format=value(name,size,md5_hash,update_time,crc32c_hash,creation_time)",
     ]
-    try:
-        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1)
-    except OSError as e:
-        cov.notes.append(f"failed to start gcloud for {uri}: {e}")
-        return
-
-    pbar = tqdm(desc=f"gcs:  {uri}", unit="obj", leave=False)
+    stderr_file = tempfile.NamedTemporaryFile(mode="w+", delete=False, prefix="audit_stderr_", suffix=".log")
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=stderr_file, text=True, bufsize=1)
     try:
         assert proc.stdout is not None
         for line in proc.stdout:
@@ -316,14 +326,74 @@ def scan_gcs(uri: str, cov: CoverageEntry) -> Iterator[Row]:
                 source_episode_guess=guess_episode(url),
                 notes="; ".join(notes_parts),
             )
-        proc.wait(timeout=60)
+        proc.wait(timeout=120)
+        stderr_file.flush()
+        stderr_file.seek(0)
+        stderr_text = stderr_file.read()
         if proc.returncode != 0:
-            stderr = proc.stderr.read() if proc.stderr else ""
-            cov.notes.append(f"gcloud exit {proc.returncode} for {uri}: {stderr.strip().splitlines()[-1] if stderr.strip() else '?'}")
+            tail = stderr_text.strip().splitlines()[-1] if stderr_text.strip() else "?"
+            cov.notes.append(f"gcloud exit {proc.returncode} for {pattern}: {tail}")
     finally:
-        pbar.close()
         if proc.poll() is None:
             proc.kill()
+        stderr_file.close()
+
+
+def scan_gcs(uri: str, cov: CoverageEntry) -> Iterator[Row]:
+    """Scan a GCS uri (gs://bucket/ or gs://bucket/prefix/).
+
+    Strategy: split into per-top-level-child invocations. Single mega-listings
+    of huge buckets stall in practice (observed: >1h hang in a 562k-object
+    bucket). Per-prefix listings bound each invocation's runtime and let us
+    progress past a single bad prefix.
+    """
+    if not uri.startswith("gs://"):
+        cov.notes.append(f"skipping non-gs uri: {uri}")
+        return
+    rest = uri[len("gs://"):]
+    bucket = rest.split("/", 1)[0]
+
+    # Discover top-level children. If empty (rare bucket-level edge), fall
+    # back to a single recursive listing.
+    children = _gcs_list_top_prefixes(uri)
+    pbar = tqdm(desc=f"gcs:  {uri}", unit="obj", leave=False)
+    try:
+        if not children:
+            yield from _scan_gcs_chunk(f"{uri}**" if uri.endswith("/") else f"{uri}/**", bucket, cov, pbar)
+            return
+        for child in children:
+            # If child is itself a prefix (ends with '/'), list recursively
+            # under it; if it's a leaf object, capture it as a single chunk.
+            if child.endswith("/"):
+                pattern = child + "**"
+            else:
+                # Single object: list just that name.
+                pattern = child
+            chunk_start = cov.file_count
+            yield from _scan_gcs_chunk(pattern, bucket, cov, pbar)
+            chunk_added = cov.file_count - chunk_start
+            pbar.set_postfix_str(f"last={child.split('/')[-2 if child.endswith('/') else -1]}={chunk_added}")
+    finally:
+        pbar.close()
+
+
+def gcs_count_truth(uri: str) -> int:
+    """Independent ground-truth count of objects under uri. Same listing API,
+    but only the name field — used for post-scan integrity verification."""
+    if not uri.startswith("gs://"):
+        return -1
+    rest = uri[len("gs://"):]
+    bucket = rest.split("/", 1)[0]
+    prefix = rest[len(bucket) + 1:] if "/" in rest else ""
+    pattern = f"gs://{bucket}/{prefix}**" if prefix else f"gs://{bucket}/**"
+    cmd = ["gcloud", "storage", "objects", "list", pattern, "--verbosity=error", "--format=value(name)"]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=1800)
+    except subprocess.TimeoutExpired:
+        return -1
+    if proc.returncode != 0:
+        return -1
+    return sum(1 for line in proc.stdout.splitlines() if line.strip())
 
 
 # --- Orchestration -----------------------------------------------------------
