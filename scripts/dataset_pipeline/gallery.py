@@ -14,13 +14,21 @@ import textwrap
 from pathlib import Path
 
 GALLERY_W = 960
-GALLERY_H = 544
+GALLERY_VIDEO_H = 544          # video area height
+BOTTOM_BAR_H = 240             # black band beneath the video for the caption
+GALLERY_H = GALLERY_VIDEO_H + BOTTOM_BAR_H   # final canvas: 960x784
 GALLERY_FPS = 24
 INTERCLIP_BLACK_S = 0.5
-PROMPT_WRAP_COLS = 48
-PROMPT_MAX_LINES = 4
-INDEX_FONTSIZE = 56
-PROMPT_FONTSIZE = 26
+# Caption layout (inside the 240px black band)
+PROMPT_WRAP_COLS = 78
+PROMPT_MAX_LINES = 9           # 9 lines * ~24px line-height ≈ 216px → fits in 240px band
+INDEX_FONTSIZE = 48
+PROMPT_FONTSIZE = 18
+# Audio target — uniform encoder params so concat -c copy works.
+AUDIO_CODEC = "aac"
+AUDIO_RATE = 44100
+AUDIO_CH = 2
+AUDIO_BR = "96k"
 
 
 def _find_font() -> str:
@@ -61,12 +69,15 @@ def _ensure_black_filler(work_dir: Path) -> Path:
     p = work_dir / "_black.mp4"
     if p.exists():
         return p
+    # Black video + silent stereo audio so concat -c copy works alongside
+    # per-clip renders that carry their source audio.
     cmd = [
         "ffmpeg", "-y", "-loglevel", "error",
-        "-f", "lavfi",
-        "-i", f"color=c=black:s={GALLERY_W}x{GALLERY_H}:d={INTERCLIP_BLACK_S}:r={GALLERY_FPS}",
+        "-f", "lavfi", "-i", f"color=c=black:s={GALLERY_W}x{GALLERY_H}:d={INTERCLIP_BLACK_S}:r={GALLERY_FPS}",
+        "-f", "lavfi", "-i", f"anullsrc=channel_layout=stereo:sample_rate={AUDIO_RATE}",
+        "-shortest",
         "-c:v", "libx264", "-preset", "fast", "-crf", "20", "-pix_fmt", "yuv420p",
-        "-an",
+        "-c:a", AUDIO_CODEC, "-ar", str(AUDIO_RATE), "-ac", str(AUDIO_CH), "-b:a", AUDIO_BR,
         str(p),
     ]
     subprocess.run(cmd, check=True)
@@ -74,29 +85,40 @@ def _ensure_black_filler(work_dir: Path) -> Path:
 
 
 def render_per_clip(src_mp4: Path, prompt_text: str, idx: int, out_mp4: Path) -> None:
-    """Pass 1: scale + pad to canvas, burn index top-left, burn caption bottom."""
+    """Render one gallery clip:
+      - Top 960×544: video scaled+padded.
+      - Bottom 240px: solid black band carrying the wrapped caption.
+      - Index '#NNNN' burned top-left of the video region.
+      - Source audio preserved (re-encoded to AAC for concat compatibility).
+    Final canvas = 960×784.
+    """
     out_mp4.parent.mkdir(parents=True, exist_ok=True)
     wrapped = _wrap_caption(prompt_text)
-    # Write the wrapped prompt to a sidecar text file for drawtext textfile=.
     prompt_tmp = out_mp4.with_suffix(".prompt.txt")
     prompt_tmp.write_text(wrapped)
 
     font = _find_font()
     font_arg = f":fontfile='{font}'" if font else ""
 
-    label = f"#{idx:04d}"
-    label_esc = _drawtext_escape(label)
+    label_esc = _drawtext_escape(f"#{idx:04d}")
+
+    # Caption sits inside the bottom band: y starts at GALLERY_VIDEO_H + 16 (16px top padding).
+    caption_y = GALLERY_VIDEO_H + 16
 
     vf = (
-        f"scale={GALLERY_W}:{GALLERY_H}:force_original_aspect_ratio=decrease,"
-        f"pad={GALLERY_W}:{GALLERY_H}:(ow-iw)/2:(oh-ih)/2:black,"
+        # 1. fit video into 960×544 with letterbox
+        f"scale={GALLERY_W}:{GALLERY_VIDEO_H}:force_original_aspect_ratio=decrease,"
+        f"pad={GALLERY_W}:{GALLERY_VIDEO_H}:(ow-iw)/2:(oh-ih)/2:black,"
+        # 2. extend canvas downward — content stays at top, bottom 240px is black
+        f"pad={GALLERY_W}:{GALLERY_H}:0:0:black,"
+        # 3. index label inside the video region
         f"drawtext=text='{label_esc}':x=24:y=24:"
         f"fontsize={INDEX_FONTSIZE}:fontcolor=white:"
-        f"box=1:boxcolor=black@0.65:boxborderw=12{font_arg},"
+        f"box=1:boxcolor=black@0.65:boxborderw=10{font_arg},"
+        # 4. caption inside the bottom band — left-aligned, padded
         f"drawtext=textfile='{prompt_tmp}':"
-        f"x=(w-text_w)/2:y=h-text_h-30:"
-        f"fontsize={PROMPT_FONTSIZE}:fontcolor=white:"
-        f"box=1:boxcolor=black@0.7:boxborderw=14:line_spacing=8{font_arg}"
+        f"x=24:y={caption_y}:"
+        f"fontsize={PROMPT_FONTSIZE}:fontcolor=white:line_spacing=6{font_arg}"
     )
     cmd = [
         "ffmpeg", "-y", "-loglevel", "error",
@@ -104,7 +126,7 @@ def render_per_clip(src_mp4: Path, prompt_text: str, idx: int, out_mp4: Path) ->
         "-vf", vf,
         "-r", str(GALLERY_FPS),
         "-c:v", "libx264", "-preset", "fast", "-crf", "20", "-pix_fmt", "yuv420p",
-        "-an",
+        "-c:a", AUDIO_CODEC, "-ar", str(AUDIO_RATE), "-ac", str(AUDIO_CH), "-b:a", AUDIO_BR,
         str(out_mp4),
     ]
     subprocess.run(cmd, check=True)
