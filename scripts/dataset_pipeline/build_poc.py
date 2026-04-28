@@ -121,6 +121,8 @@ class POCClip:
 def build_skye(out_root: Path, limit: int) -> list[POCClip]:
     v2 = pq.read_table(LOCAL_PARQUET_CACHE / "skye_v2.parquet").to_pylist()
     aug = pq.read_table(LOCAL_PARQUET_CACHE / "skye_all_seasons_results_filte.parquet").to_pylist()
+    if limit <= 0:
+        limit = len(v2)
     aug_by_key: dict[tuple, list[dict]] = {}
     for r in aug:
         k = (r.get("season_number"), r.get("episode_number"),
@@ -175,6 +177,8 @@ def build_skye(out_root: Path, limit: int) -> list[POCClip]:
 def build_chase(out_root: Path, limit: int) -> list[POCClip]:
     js = json.loads((LOCAL_PARQUET_CACHE / "chase.json").read_text())
     chase_aug = pq.read_table(LOCAL_PARQUET_CACHE / "chase_all_seasoned_results_fil.parquet").to_pylist()
+    if limit <= 0:
+        limit = len(js)
     cap_by_url = {r["output_video_path"]: r["scene_caption"]
                   for r in chase_aug if r.get("output_video_path") and r.get("scene_caption")}
 
@@ -282,7 +286,7 @@ def upload_to_gcs(local_root: Path, gcs_dst: str) -> None:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--character", required=True, choices=["chase", "skye", "both"])
-    ap.add_argument("--limit", type=int, default=5)
+    ap.add_argument("--limit", type=int, default=5, help="Cap clips processed (0 or negative = all entries in manifest)")
     ap.add_argument("--local-out", default="/tmp/training_data_poc")
     ap.add_argument("--no-upload", action="store_true",
                     help="Skip GCS upload (just produce locally)")
