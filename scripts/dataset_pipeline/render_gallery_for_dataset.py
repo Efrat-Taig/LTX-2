@@ -40,7 +40,9 @@ def main() -> int:
 
     md = json.loads(md_path.read_text())
     clips = md.get("clips", [])
-    per_clip_dir = root / "gallery" / "per_clip"
+    # Per-clip overlays + concat list stay LOCAL (regeneration cache, not uploaded).
+    work_dir = root / "_qa_render_cache"
+    per_clip_dir = work_dir / "per_clip"
     per_clip_dir.mkdir(parents=True, exist_ok=True)
 
     rendered = 0
@@ -70,8 +72,8 @@ def main() -> int:
             failed += 1
 
     active = [c["index"] for c in clips if c.get("download_ok", True) and c.get("prompt")]
-    concat_list = root / "gallery" / "concat.txt"
-    gallery_mp4 = root / "gallery" / "gallery.mp4"
+    concat_list = work_dir / "concat.txt"
+    gallery_mp4 = root / "qa_gallery.mp4"
     print(f"\n[concat] active={len(active)} clips, rendered_this_run={rendered}, skipped={skipped}, failed={failed}", flush=True)
     build_concat_list(active, per_clip_dir, concat_list)
     concat_gallery(concat_list, gallery_mp4)
@@ -79,12 +81,13 @@ def main() -> int:
 
     # Update metadata
     import datetime as dt
-    md["gallery"] = {
-        "path": "gallery/gallery.mp4",
+    md["qa_gallery"] = {
+        "path": "qa_gallery.mp4",
         "interclip_black_s": 0.5,
         "rendered_at": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "rendered_index_count": sum(1 for i in active if (per_clip_dir / f"{i:04d}.mp4").exists()),
     }
+    md.pop("gallery", None)  # drop legacy field if present
     md_path.write_text(json.dumps(md, indent=2, ensure_ascii=False))
     return 0
 
