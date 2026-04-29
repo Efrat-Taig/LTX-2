@@ -26,15 +26,19 @@ Each dataset there is self-contained and follows a single layout (see [`training
 
 ```
 training_data/{dataset_id}/
-    metadata.json           ← canonical record (raw captions, status, md5, provenance)
-    source_gallery.mp4      ← visual QC: raw clips, full duration, letterboxed for canvas fit
-    training_gallery.mp4    ← visual QC: exact 49-frame letterboxed clips the model trains on
-    videos/0NNN.mp4         ← raw downloads
-    processed_videos/0NNN.mp4   ← 960×544 letterboxed + 49-frame trim (what trainer reads)
+    metadata.json                                          ← canonical record (raw captions, status, md5, layout, provenance)
+    source_gallery.mp4                                     ← raw clips, full duration, letterboxed for canvas fit
+    training_gallery.mp4                                   ← 49-frame letterboxed clips — what the model trains on
+    raw_videos/0NNN.mp4                                    ← untouched manifest downloads
+    processed_videos/
+        0NNN.mp4                                           ← 960×544 letterboxed + 49-frame trim (the trainer's input)
+        processing_summary.txt                             ← exact ffmpeg recipe
     precomputed/
-        latents/videos/0NNN.pt       ← VAE video latents
-        conditions/videos/0NNN.pt    ← Gemma text embeddings
+        vae_latents_video/processed_videos/0NNN.pt         ← VAE video latents (128×7×17×30, bf16)
+        text_prompt_conditions/processed_videos/0NNN.pt    ← Gemma text embeddings (1024×4096, bf16)
 ```
+
+**Training-time bridge:** the LTX-2 trainer hardcodes `latents/` and `conditions/` as its read paths. After pulling a dataset to a training machine, run `bash scripts/dataset_pipeline/stage_for_training.sh DATASET_DIR` once — it creates `precomputed/{latents,conditions}` symlinks pointing at the human-readable dirs. Trainer then reads through the symlinks. No fork, no rename.
 
 **Currently shipped:**
 
@@ -116,6 +120,14 @@ bash scripts/dataset_pipeline/build_full.sh skye
 # Then push to GCS from your local (VM SA can't write to training_data/ prefix):
 bash scripts/dataset_pipeline/upload_dataset_to_gcs.sh chase_golden_v1
 bash scripts/dataset_pipeline/upload_dataset_to_gcs.sh skye_golden_v2
+```
+
+**To prepare for training on a fresh machine:**
+```bash
+gcloud storage rsync -r gs://video_gen_dataset/TinyStories/training_data/chase_golden_v1 \
+    ~/data/chase_golden_v1
+bash scripts/dataset_pipeline/stage_for_training.sh ~/data/chase_golden_v1
+# Now point a training config's data.preprocessed_data_root at ~/data/chase_golden_v1/precomputed
 ```
 
 **To delete a bad clip:**

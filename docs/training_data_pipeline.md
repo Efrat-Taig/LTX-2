@@ -26,15 +26,19 @@ Everything else is reproducible.
 
 ```
 gs://video_gen_dataset/TinyStories/training_data/{dataset_id}/
-    metadata.json                                 ← canonical record (raw caps, status, md5, provenance)
-    source_gallery.mp4                            ← raw clips for visual context (full duration)
-    training_gallery.mp4                          ← what the model trains on (49-frame letterboxed)
-    videos/0001.mp4 … 000N.mp4                    ← raw downloads (variable resolution, full duration)
-    processed_videos/0001.mp4 … 000N.mp4          ← letterboxed to 960×544, trimmed to 49 frames
+    metadata.json                                          ← canonical record (raw caps, status, md5, layout, provenance)
+    source_gallery.mp4                                     ← raw clips for visual context (full duration)
+    training_gallery.mp4                                   ← what the model trains on (49-frame letterboxed)
+    raw_videos/0001.mp4 … 000N.mp4                         ← untouched manifest downloads (variable resolution + duration)
+    processed_videos/
+        0001.mp4 … 000N.mp4                                ← letterboxed to 960×544, trimmed to 49 frames @ 24fps
+        processing_summary.txt                             ← exact ffmpeg recipe for the transform (informational)
     precomputed/
-        latents/videos/0001.pt … 000N.pt          ← VAE video latents (128×7×17×30, bf16)
-        conditions/videos/0001.pt … 000N.pt       ← Gemma text embeddings (1024×4096 + audio split)
+        vae_latents_video/processed_videos/0001.pt … .pt   ← VAE-encoded video latents, shape (128, 7, 17, 30) bf16
+        text_prompt_conditions/processed_videos/0001.pt    ← Gemma-encoded prompt embeddings, (1024, 4096) bf16
 ```
+
+> **Trainer constraint:** the LTX-2 trainer's `process_dataset.py` hardcodes `latents/` and `conditions/` as its read paths. The GCS canonical names above are the human-readable form. On any local training machine, run `scripts/dataset_pipeline/stage_for_training.sh DATASET_DIR` once to create symlinks `precomputed/latents → vae_latents_video` and `precomputed/conditions → text_prompt_conditions`. Trainer then reads through the symlinks — no fork, no rename.
 
 `{dataset_id}` convention: `{character}_golden_v{N}`. Currently:
 - `chase_golden_v1` — 605 clips from `chase_golden.json`
@@ -70,7 +74,7 @@ gs://video_gen_dataset/TinyStories/training_data/{dataset_id}/
       "source_season": 1,
       "source_scene_number": 84.0,
       "speaker": "CHASE",
-      "video": "videos/0001.mp4",                   // raw download, relative to dataset root
+      "video": "raw_videos/0001.mp4",               // untouched download, relative to dataset root
       "video_md5": "...",
       "prompt": "Chase, a happy animated dog, ...",  // RAW — no brand token here
       "duration_s": 2.46, "width": 1252, "height": 1080, "fps": 24.0,
@@ -112,7 +116,7 @@ Both galleries: 960×784 canvas (544 video + 240 caption band). Index `#NNNN` to
 
 | | source_gallery.mp4 | training_gallery.mp4 |
 |---|---|---|
-| Source files | `videos/` (raw downloads) | `processed_videos/` (pre-letterboxed) |
+| Source files | `raw_videos/` (untouched downloads) | `processed_videos/` (pre-letterboxed) |
 | Per-clip transform | `scale-to-fit + black-bar pad` (letterbox) | none — already letterboxed |
 | Per-clip duration | full original (variable, 2–6 s) | 49 frames @ 24fps = 2.04s exactly |
 | Use | "what the source actually looks like" | "what the model trains on" |
@@ -137,10 +141,11 @@ Internally that runs four stages (each idempotent — re-running skips completed
 
 | # | Stage | Script | What it does |
 |---|---|---|---|
-| 1 | raw | `build_poc.py --limit 0` | Resolves manifest URLs, downloads `videos/*.mp4`, ffprobes each, writes `metadata.json` |
-| 2 | letterbox + galleries | `render_gallery_for_dataset.py` | Pre-processes raw → `processed_videos/` (960×544 letterbox + 49-frame trim), renders both galleries with brand tokens |
+| 1 | raw | `build_poc.py --limit 0` | Resolves manifest URLs, downloads `raw_videos/*.mp4`, ffprobes each, writes `metadata.json` |
+| 2 | letterbox + galleries | `render_gallery_for_dataset.py` | Pre-processes raw → `processed_videos/` (960×544 letterbox + 49-frame trim), renders both galleries with brand tokens, drops `processing_summary.txt` |
 | 3 | trainer CSV | `emit_trainer_csv.py` | Writes `_trainer_input.csv` (ephemeral) at dataset root with `caption` (substituted) + `video_path` (→ `processed_videos/0NNN.mp4`) |
-| 4 | latents + conditions | `process_dataset.py` (LTX-2 trainer) | Encodes VAE latents + Gemma text embeddings into `precomputed/` |
+| 4 | latents + conditions | `process_dataset.py` (LTX-2 trainer) → `build_full.sh` rename step | Encodes VAE latents + Gemma text embeddings; trainer writes to `precomputed/{latents,conditions}/` then `build_full.sh` renames them to `precomputed/{vae_latents_video,text_prompt_conditions}/` |
+| 5 | (training-time only) | `stage_for_training.sh` | On the local training machine, creates `precomputed/{latents,conditions}` symlinks pointing at the human-readable dirs so the trainer's `PrecomputedDataset` Just Works |
 
 Stage 4 is the only GPU-bound stage. On A100 80GB it processes ~1 clip every 5–10s; full chase (605) ≈ 60 min, full skye (111) ≈ 12 min.
 
@@ -160,13 +165,13 @@ If a future v3 publishes valid URLs, the join is replaced by direct `output_vide
 
 ```bash
 python scripts/dataset_pipeline/manage.py delete \
-  --dataset gs/training_data/.../chase_golden_v1 \
+  --dataset /local/training_data/chase_golden_v1 \
   --index 42 \
   --reason "low quality, character off-model"
 ```
 
 Atomic per invocation:
-1. Move `videos/0042.mp4`, `processed_videos/0042.mp4`, `precomputed/{latents,conditions}/videos/0042.pt`, `_qa_render_cache/{source,training}/per_clip/0042.mp4` → `_trash/<ts>/`.
+1. Move `raw_videos/0042.mp4`, `processed_videos/0042.mp4`, `precomputed/{vae_latents_video,text_prompt_conditions}/processed_videos/0042.pt`, `_qa_render_cache/{source,training}/per_clip/0042.mp4` → `_trash/<ts>/`.
 2. Update `metadata.json`: clip 42's `status` → `deleted`, `deletion` block populated.
 3. Append `audit/deletions.log`.
 4. Re-concat both galleries (per-clip overlays are kept; missing index just yields a gap).
@@ -217,13 +222,15 @@ The smoke is the contract: any future dataset rebuild must still pass this befor
 
 | Script | Purpose |
 |---|---|
-| `scripts/dataset_pipeline/build_poc.py` | Stage 1: resolve manifest, download raw clips, write metadata.json. `--limit 0` = full manifest. |
+| `scripts/dataset_pipeline/build_poc.py` | Stage 1: resolve manifest, download raw clips → `raw_videos/`, write metadata.json. `--limit 0` = full manifest. |
 | `scripts/dataset_pipeline/captions.py` | Caption resolver: multi-parquet URL→caption lookup; `apply_brand_tokens(s, mapping)`; `load_brand_tokens()` reads YAML. |
 | `scripts/dataset_pipeline/gallery.py` | ffmpeg renderers: `transform_to_training_format()`, `render_per_clip(mode='source'|'training')`, concat helpers. |
-| `scripts/dataset_pipeline/render_gallery_for_dataset.py` | Stage 2 driver: preprocess + dual gallery + metadata update. |
-| `scripts/dataset_pipeline/emit_trainer_csv.py` | Stage 3: write `_trainer_input.csv` with brand-token substitution. |
-| `scripts/dataset_pipeline/build_full.sh` | Stages 1–4 wrapper for one character (used overnight). |
-| `scripts/dataset_pipeline/upload_dataset_to_gcs.sh` | Pull built dataset from VM, push to GCS via local creds. |
+| `scripts/dataset_pipeline/render_gallery_for_dataset.py` | Stage 2 driver: `raw_videos/` → `processed_videos/` + dual gallery + metadata update. |
+| `scripts/dataset_pipeline/emit_trainer_csv.py` | Stage 3: write `_trainer_input.csv` (brand-token substitution applied). |
+| `scripts/dataset_pipeline/build_full.sh` | Stages 1–4 wrapper for one character; renames trainer outputs to `vae_latents_video`/`text_prompt_conditions` + drops `processing_summary.txt`. |
+| `scripts/dataset_pipeline/stage_for_training.sh` | Local-only: creates `precomputed/{latents,conditions}` symlinks before training. |
+| `scripts/dataset_pipeline/upload_dataset_to_gcs.sh` | Pull built dataset from VM, push to GCS via local creds (with `--partial` retries). |
 | `scripts/dataset_pipeline/manage.py` | Mutation: `delete`, `restore`, `list`, `rebuild-gallery`. |
 | `scripts/dataset_pipeline/brand_tokens.yaml` | Substitution map (configurable, no rebuild needed to change). |
+| `scripts/dataset_pipeline/processing_summary.txt` | Static template copied into each dataset's `processed_videos/` at build time. |
 | `packages/ltx-trainer/configs/_smoke_chase_v1.yaml` | 50-step pipeline validator config. (gitignored — scp'd to VM.) |
