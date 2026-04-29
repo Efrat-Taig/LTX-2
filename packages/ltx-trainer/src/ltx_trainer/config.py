@@ -259,6 +259,28 @@ class ValidationConfig(ConfigBaseModel):
         gt=0,
     )
 
+    loss_holdout_count: int = Field(
+        default=0,
+        description="Number of clips at the END of the training set (sorted by filename) to hold out "
+        "as a validation set for forward-pass loss tracking. 0 disables val/loss. "
+        "Recommended: ~5%% of dataset size, e.g. 10 for 100-clip set, 30 for 600-clip set.",
+        ge=0,
+    )
+
+    loss_interval: int | None = Field(
+        default=None,
+        description="Number of steps between validation-loss passes. If None, falls back to `interval`. "
+        "Set lower than `interval` to track val/loss more frequently than the (expensive) "
+        "video-sample validation.",
+        gt=0,
+    )
+
+    loss_seed: int = Field(
+        default=2025,
+        description="Seed for sigma sampling during validation-loss passes. Held constant across runs "
+        "so val/loss values are comparable run-to-run.",
+    )
+
     videos_per_prompt: int = Field(
         default=1,
         description="Number of videos to generate per validation prompt",

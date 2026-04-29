@@ -24,7 +24,7 @@ from torch.optim.lr_scheduler import (
     PolynomialLR,
     StepLR,
 )
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Subset
 from torchvision.transforms import functional as F  # noqa: N812
 
 from ltx_core.text_encoders.gemma import convert_to_additive_mask
@@ -89,6 +89,8 @@ class LtxvTrainer:
         self._load_checkpoint()
         self._prepare_models_for_training()
         self._dataset = None
+        self._val_dataloader: DataLoader | None = None
+        self._val_sigma_tracker = SigmaBucketTracker()
         self._global_step = -1
         self._checkpoint_paths = []
         self._sigma_tracker = SigmaBucketTracker()
@@ -249,10 +251,28 @@ class LtxvTrainer:
                         metrics = {
                             "train/loss": step_loss,
                             "train/learning_rate": current_lr,
-                            "train/step_time": step_time,
+                            "system/step_time": step_time,
                         }
                         metrics.update(self._sigma_tracker.get_metrics())
                         self._log_metrics(metrics)
+
+                        # Validation-loss pass (held-out clips, no backward).
+                        # Cadence: validation.loss_interval if set, else falls
+                        # back to validation.interval. Same dispatch site as
+                        # video-sample validation but cheaper (no inference).
+                        val_interval = (
+                            self._config.validation.loss_interval
+                            or self._config.validation.interval
+                        )
+                        if (
+                            self._val_dataloader is not None
+                            and val_interval
+                            and self._global_step > 0
+                            and self._global_step % val_interval == 0
+                        ):
+                            val_metrics = self._compute_validation_loss()
+                            if val_metrics:
+                                self._log_metrics(val_metrics)
 
                     # Fallback logging when progress bars are disabled
                     if disable_progress_bars and IS_MAIN_PROCESS and self._global_step % 20 == 0:
@@ -320,6 +340,53 @@ class LtxvTrainer:
         self._accelerator.end_training()
 
         return saved_path, stats
+
+    @torch.inference_mode()
+    def _compute_validation_loss(self) -> dict[str, float] | None:
+        """Forward pass on the held-out val set; returns metrics for W&B.
+
+        Returns None if val is disabled. Otherwise returns a dict with:
+          - val/loss: mean loss across the val set
+          - val/loss_sigma_<lo-hi>: mean loss within each sigma bucket
+
+        Sigma sampling is seeded with validation.loss_seed so the same noise
+        levels are used every run, making val/loss numbers comparable.
+        """
+        if self._val_dataloader is None:
+            return None
+        self._transformer.eval()
+        # Seed RNG so sigma sampling is deterministic across runs.
+        cpu_state = torch.get_rng_state()
+        cuda_state = torch.cuda.get_rng_state() if torch.cuda.is_available() else None
+        val_seed = self._config.validation.loss_seed
+        torch.manual_seed(val_seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(val_seed)
+
+        sigma_loss_pairs: list[tuple[float, float]] = []
+        try:
+            for batch in self._val_dataloader:
+                loss = self._training_step(batch)
+                scalar = float(loss.item())
+                # _last_step_sigmas holds this batch's per-element sigmas.
+                # Broadcast the scalar loss to each element (batch_size=1 in
+                # current configs → one (sigma, loss) pair per batch).
+                for s in self._last_step_sigmas:
+                    sigma_loss_pairs.append((s, scalar))
+        finally:
+            torch.set_rng_state(cpu_state)
+            if cuda_state is not None:
+                torch.cuda.set_rng_state(cuda_state)
+            self._transformer.train()
+
+        if not sigma_loss_pairs:
+            return None
+        sigmas = [s for s, _ in sigma_loss_pairs]
+        losses = [l for _, l in sigma_loss_pairs]
+        self._val_sigma_tracker.update(sigmas, losses)
+        metrics: dict[str, float] = {"val/loss": sum(losses) / len(losses)}
+        metrics.update(self._val_sigma_tracker.get_metrics(prefix="val"))
+        return metrics
 
     def _training_step(self, batch: dict[str, dict[str, Tensor]]) -> Tensor:
         """Perform a single training step using the configured strategy."""
@@ -620,7 +687,13 @@ class LtxvTrainer:
             raise ValueError(f"Invalid checkpoint path: {checkpoint_path}. Must be a file or directory.")
 
     def _init_dataloader(self) -> None:
-        """Initialize the training data loader using the strategy's data sources."""
+        """Initialize the training data loader using the strategy's data sources.
+
+        If validation.loss_holdout_count > 0, the LAST `loss_holdout_count` clips
+        of the dataset (sorted by filename for determinism) are split off into a
+        held-out validation loader (self._val_dataloader). They are excluded from
+        the train loader so val/loss measures generalization, not memorization.
+        """
         if self._dataset is None:
             # Get data sources from the training strategy
             data_sources = self._training_strategy.get_data_sources()
@@ -628,9 +701,37 @@ class LtxvTrainer:
             self._dataset = PrecomputedDataset(self._config.data.preprocessed_data_root, data_sources=data_sources)
             logger.debug(f"Loaded dataset with {len(self._dataset):,} samples from sources: {list(data_sources)}")
 
+            # Sort sample lists by filename so the val holdout is deterministic
+            # across runs / processes (PrecomputedDataset uses dir.glob() which
+            # is filesystem-dependent order).
+            for key in list(self._dataset.sample_files.keys()):
+                self._dataset.sample_files[key].sort()
+
+        n_total = len(self._dataset)
+        val_count = self._config.validation.loss_holdout_count
+        if val_count > 0 and val_count >= n_total:
+            logger.warning(
+                f"validation.loss_holdout_count={val_count} ≥ dataset size {n_total}; "
+                "disabling val/loss tracking (need at least one train clip)."
+            )
+            val_count = 0
+
+        if val_count > 0:
+            train_indices = list(range(n_total - val_count))
+            val_indices = list(range(n_total - val_count, n_total))
+            train_subset = Subset(self._dataset, train_indices)
+            val_subset = Subset(self._dataset, val_indices)
+            logger.info(
+                f"Train/val split: {len(train_subset)} train clips, {len(val_subset)} val-loss clips "
+                f"(indices {val_indices[0]}…{val_indices[-1]})"
+            )
+        else:
+            train_subset = self._dataset
+            val_subset = None
+
         num_workers = self._config.data.num_dataloader_workers
         dataloader = DataLoader(
-            self._dataset,
+            train_subset,
             batch_size=self._config.optimization.batch_size,
             shuffle=True,
             drop_last=True,
@@ -638,8 +739,21 @@ class LtxvTrainer:
             pin_memory=num_workers > 0,
             persistent_workers=num_workers > 0,
         )
-
         self._dataloader = self._accelerator.prepare(dataloader)
+
+        if val_subset is not None:
+            val_loader = DataLoader(
+                val_subset,
+                batch_size=self._config.optimization.batch_size,
+                shuffle=False,
+                drop_last=False,
+                num_workers=0,  # val pass is short; skip worker startup cost
+                pin_memory=False,
+                persistent_workers=False,
+            )
+            self._val_dataloader = self._accelerator.prepare(val_loader)
+        else:
+            self._val_dataloader = None
 
     def _init_lora_weights(self) -> None:
         """Initialize LoRA weights for the transformer."""
@@ -1009,6 +1123,21 @@ class LtxvTrainer:
             config=self._config.model_dump(),
         )
         self._wandb_run = run
+
+        # Mark train/loss + val/loss as the run's primary metrics. W&B's UI
+        # surfaces metrics with `goal` as headline charts, and the
+        # `step_metric` ties them to our explicit global_step axis.
+        run.define_metric("train/global_step")
+        run.define_metric("train/loss", step_metric="train/global_step",
+                          summary="min", goal="minimize")
+        run.define_metric("val/loss", step_metric="train/global_step",
+                          summary="min", goal="minimize")
+        run.define_metric("train/loss_sigma_*", step_metric="train/global_step", summary="last")
+        run.define_metric("val/loss_sigma_*", step_metric="train/global_step", summary="last")
+        run.define_metric("train/learning_rate", step_metric="train/global_step", summary="last")
+        # Step time is system telemetry, not a training metric. Putting it under
+        # `system/` keeps the `train/` panel clean (loss curves first).
+        run.define_metric("system/step_time", step_metric="train/global_step", summary="mean")
 
     def _log_metrics(self, metrics: dict[str, float]) -> None:
         """Log metrics to Weights & Biases.
