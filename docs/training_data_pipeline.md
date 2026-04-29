@@ -199,6 +199,46 @@ Indices never renumber — gaps are intentional. "Clip #42" means index 42 forev
 
 ---
 
+## 9b. Training instrumentation — what every config should log
+
+The trainer (`packages/ltx-trainer/src/ltx_trainer/trainer.py`) logs three families
+of metric to W&B. Every new training config should opt into all three.
+
+| Metric | Cadence | Source |
+|---|---|---|
+| `train/loss` | every step | total loss this step |
+| `train/loss_sigma_0.00-0.25` … `0.75-1.00` | every step | `SigmaBucketTracker` — sigma-bucketed train loss |
+| `train/learning_rate` | every step | optimizer LR |
+| `val/loss` | every `loss_interval` | mean loss across the held-out clips |
+| `val/loss_sigma_0.00-0.25` … `0.75-1.00` | every `loss_interval` | sigma-bucketed val loss |
+| `system/step_time` | every step | step latency telemetry (separated from train/) |
+
+**To enable val/loss in a config**, add three lines under `validation:`:
+
+```yaml
+validation:
+  loss_holdout_count: 30          # ~5% of dataset; 0 disables val/loss
+  loss_interval: 50               # cheaper than the video-sample interval
+  loss_seed: 2025                 # held constant → val/loss comparable run-to-run
+```
+
+What happens under the hood:
+- The dataset is sorted by filename for determinism.
+- The LAST `loss_holdout_count` clips become the val set; they are excluded from training.
+- Every `loss_interval` steps the trainer runs a forward-only pass (`@torch.inference_mode`)
+  on the val set with seeded sigma sampling; logs `val/loss` + sigma-bucketed siblings.
+- RNG state is restored after the val pass — train continues unaffected.
+
+**W&B workspace gotcha:** `val/*` panels do not auto-appear if the workspace
+was laid out before the first val pass logged. Either use `+ Add Panel` to
+search for `val/loss`, or click "Reset to default" / "Auto-generate panels"
+in the workspace dropdown.
+
+The canonical reference template `packages/ltx-trainer/configs/ltx2_av_lora.yaml`
+includes the val-loss block — copy from there when starting a new experiment.
+
+---
+
 ## 10. Smoke train (pipeline validator, not real training)
 
 `packages/ltx-trainer/configs/_smoke_chase_v1.yaml` — minimal 50-step rank-16 LoRA on the 5-clip chase POC. Run:

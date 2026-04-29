@@ -220,6 +220,17 @@ validation:
   # Set to null to disable validation during training
   interval: 100
 
+  # ---- Validation-LOSS tracking (forward pass on held-out clips) ----
+  # The trainer holds out the LAST `loss_holdout_count` clips of the dataset
+  # (sorted by filename) and computes loss on them every `loss_interval`
+  # steps. Logs `val/loss` and `val/loss_sigma_*` to W&B.
+  #
+  # 0 = disabled. For most datasets, set to ~5% of clip count.
+  # Don't set higher than (n_clips - batch_size) or training will be empty.
+  loss_holdout_count: 30          # ~5% of a 600-clip dataset
+  loss_interval: 50               # cheap (no inference); fire often
+  loss_seed: 2025                 # constant sigma seed → comparable across runs
+
   # Number of videos to generate per prompt
   videos_per_prompt: 1
 
