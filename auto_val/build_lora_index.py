@@ -23,7 +23,7 @@ import shutil
 from pathlib import Path
 
 REPO  = Path("/Users/efrattaig/projects/sm/LTX-2")
-ROOT  = REPO / "lora_results"
+ROOT  = (REPO / "lora_results").resolve()
 TEMPLATE = ROOT / "goldenPlus150_version1" / "goldenPLUS150_benchmark" / "compare.html"
 
 STEP_RE = re.compile(r"^step_(\d+)$")
@@ -160,7 +160,8 @@ def ensure_viewer(bench: Path, cfg: dict) -> None:
     cfg_path = bench / "compare_config.json"
     cfg_path.write_text(json.dumps(cfg, indent=2))
     html_path = bench / "compare.html"
-    if not html_path.is_file():
+    # Always overwrite so template tweaks (size controls, etc.) propagate.
+    if html_path.resolve() != TEMPLATE.resolve():
         shutil.copy2(TEMPLATE, html_path)
 
 

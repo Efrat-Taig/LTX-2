@@ -63,9 +63,10 @@
 
     .grid {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      grid-template-columns: repeat(auto-fill, minmax(var(--card-min, 560px), 1fr));
       gap: 14px;
     }
+    .controls .size-btn.active { background: #2a5a8a; border-color: #4a80c0; color: #fff; }
     .card {
       background: #1a1a20;
       border: 1px solid #2a2a32;
@@ -113,7 +114,33 @@
     <button id="pause-all">⏸ pause all</button>
     <button id="restart-all">⟲ restart</button>
     <button id="sync">🔗 sync to first</button>
+    <span class="sep">|</span>
+    size:
+    <button class="size-btn" data-size="320">S</button>
+    <button class="size-btn" data-size="440">M</button>
+    <button class="size-btn" data-size="560">L</button>
+    <button class="size-btn" data-size="720">XL</button>
+    <button class="size-btn" data-size="960">XXL</button>
   </div>
+
+  <script>
+    (function setupSize() {
+      const saved = parseInt(localStorage.getItem('lora-card-min')) || 560;
+      document.documentElement.style.setProperty('--card-min', saved + 'px');
+      document.addEventListener('DOMContentLoaded', () => {
+        document.querySelectorAll('.size-btn').forEach(b => {
+          if (parseInt(b.dataset.size) === saved) b.classList.add('active');
+          b.onclick = () => {
+            const sz = parseInt(b.dataset.size);
+            document.documentElement.style.setProperty('--card-min', sz + 'px');
+            localStorage.setItem('lora-card-min', sz);
+            document.querySelectorAll('.size-btn').forEach(x => x.classList.remove('active'));
+            b.classList.add('active');
+          };
+        });
+      });
+    })();
+  </script>
 
   <main>
     <div class="grid" id="grid"></div>
