@@ -39,6 +39,7 @@ def main() -> int:
     ap.add_argument("--metadata", required=True)
     ap.add_argument("--lang", default="he", help="Target language code (default: he = Hebrew)")
     ap.add_argument("--workers", type=int, default=8)
+    ap.add_argument("--limit", type=int, default=0, help="Cap total clips translated (0 = all)")
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
 
@@ -59,6 +60,8 @@ def main() -> int:
             continue
         todo.append((c["index"], c["prompt"]))
 
+    if args.limit and args.limit > 0:
+        todo = todo[:args.limit]
     print(f"to translate: {len(todo)} (already cached: {len(existing)})", flush=True)
     if not todo:
         print("nothing to do; output already complete.")
