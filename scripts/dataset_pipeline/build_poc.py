@@ -251,23 +251,10 @@ def write_metadata(out_root: Path, character: str, version: int, source_label: s
     }
     (out_root / "metadata.json").write_text(json.dumps(md, indent=2, ensure_ascii=False))
 
-    # dataset.csv — single rich CSV. Doubles as trainer input (LTX-2's
-    # process_dataset.py reads `caption` + `video_path` columns) and the
-    # human-readable bulk review. Other columns are inert to the trainer
-    # but kept for traceability.
-    csv = out_root / "dataset.csv"
-    with csv.open("w") as f:
-        f.write("index,caption,video_path,speaker,duration_s,width,height,fps,source_episode,source_url,video_md5\n")
-        for c in clips:
-            if not (c.download_ok and c.prompt):
-                continue
-            cap = c.prompt.replace('"', '""').replace("\n", " ").strip()
-            ep = (c.source_episode or "").replace('"', '""')
-            url = (c.source_url or "").replace('"', '""')
-            f.write(
-                f'{c.index},"{cap}","{c.video}","{c.speaker}",{c.duration_s:.3f},'
-                f'{c.width},{c.height},{c.fps:.3f},"{ep}","{url}",{c.video_md5}\n'
-            )
+    # NOTE: dataset.csv has been retired — metadata.json is the canonical
+    # record, and the trainer-input CSV is generated just-in-time by
+    # emit_trainer_csv.py at <dataset>/_trainer_input.csv with brand-token
+    # substitution applied. No persistent CSV at dataset root.
 
 
 def upload_to_gcs(local_root: Path, gcs_dst: str) -> None:
