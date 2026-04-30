@@ -18,7 +18,13 @@ GALLERY_VIDEO_H = 544          # video area height — must match trainer target
 BOTTOM_BAR_H = 240             # black band beneath the video for the caption
 GALLERY_H = GALLERY_VIDEO_H + BOTTOM_BAR_H   # final canvas: 960x784
 GALLERY_FPS = 24
-GALLERY_FRAMES_PER_CLIP = 49   # mirrors trainer --resolution-buckets WxHxF
+import os as _os  # noqa: E402
+
+# Mirrors trainer --resolution-buckets WxHxF. Default 49 keeps backward
+# compatibility with the existing chase_golden / skye_golden datasets.
+# Override per dataset by setting GALLERY_FRAMES_PER_CLIP in the environment
+# (e.g. for a 5s training bucket: export GALLERY_FRAMES_PER_CLIP=121).
+GALLERY_FRAMES_PER_CLIP = int(_os.environ.get("GALLERY_FRAMES_PER_CLIP", "49"))
 INTERCLIP_BLACK_S = 0.5
 # Caption layout (inside the 240px black band)
 PROMPT_WRAP_COLS = 78
